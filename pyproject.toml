@@ -8,5 +8,8 @@ version = "0.1.0"
 description = "Local validation utilities for SF-85/SF-86 form review."
 requires-python = ">=3.9"
 
+[project.scripts]
+sf86-validate = "sf_validator.cli:main"
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
