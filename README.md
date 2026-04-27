@@ -38,9 +38,12 @@ Start the local service:
 
 Endpoints:
 
+- `GET /`
 - `GET /health`
 - `GET /schema`
 - `POST /validate`
+
+`/` now serves a simple browser UI where you can paste JSON and click `Validate`.
 
 Example:
 

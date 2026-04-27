@@ -6,3 +6,4 @@
 - 2026-04-27: Added session-only CLI runner, JSON input contract helper, and end-to-end output tests.
 - 2026-04-27: Tightened runtime schema validation with explicit type checks and CLI rejection paths.
 - 2026-04-27: Added a zero-dependency HTTP validation service, sample payload, and Render deployment config.
+- 2026-04-27: Added a browser UI at `/` for paste-and-validate testing without curl.
