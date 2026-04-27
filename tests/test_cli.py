@@ -1,3 +1,4 @@
+import contextlib
 import io
 import json
 import tempfile
@@ -39,3 +40,18 @@ class CliTests(unittest.TestCase):
         self.assertEqual(code, 0)
         output = json.loads(stdout.getvalue())
         self.assertEqual(output["flags"][0]["code"], "SECTION_13_UNEMPLOYED_NO_VERIFIER")
+
+    def test_main_rejects_invalid_schema(self) -> None:
+        payload = {"section_11": {"city": "Austin"}}
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "input.json"
+            path.write_text(json.dumps(payload), encoding="utf-8")
+
+            stdout = io.StringIO()
+            stderr = io.StringIO()
+            with redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+                code = main([str(path)])
+
+        self.assertEqual(code, 1)
+        self.assertIn("Validation error:", stderr.getvalue())

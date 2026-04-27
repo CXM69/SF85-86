@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, Optional
 
 from .exporter import build_export_summary
+from .schema import SchemaValidationError, validate_payload
 from .validator import ValidatorSuite
 
 
@@ -20,6 +21,7 @@ def _load_payload(source: str) -> Dict[str, Any]:
 
 
 def run_validation(payload: Dict[str, Any]) -> Dict[str, Any]:
+    validate_payload(payload)
     suite = ValidatorSuite()
     flags = suite.run(payload)
     return {
@@ -34,7 +36,11 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
         print("Usage: sf86-validate <input.json|->", file=sys.stderr)
         return 2
 
-    result = run_validation(_load_payload(args[0]))
+    try:
+        result = run_validation(_load_payload(args[0]))
+    except (json.JSONDecodeError, SchemaValidationError) as exc:
+        print(f"Validation error: {exc}", file=sys.stderr)
+        return 1
     json.dump(result, sys.stdout, indent=2)
     sys.stdout.write("\n")
     return 0
