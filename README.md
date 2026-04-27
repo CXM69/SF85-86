@@ -28,6 +28,38 @@ The output is JSON with:
 - `flags`: all validation flags
 - `export_summary`: `Review Required` export tags derived from Sections 21-29
 
+## HTTP Validation
+
+Start the local service:
+
+```bash
+.venv/bin/python -m sf_validator.web
+```
+
+Endpoints:
+
+- `GET /health`
+- `GET /schema`
+- `POST /validate`
+
+Example:
+
+```bash
+curl -X POST http://127.0.0.1:8000/validate \
+  -H 'Content-Type: application/json' \
+  --data @examples/sample_payload.json
+```
+
+The service validates in memory and does not persist request payloads.
+
+## Render
+
+Deployment config is in [render.yaml](render.yaml). The service starts with:
+
+```bash
+python -m sf_validator.web
+```
+
 ## Supported Validation Areas
 
 - Section 11: residence checks

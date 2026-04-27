@@ -5,3 +5,4 @@
 - 2026-04-27: Completed Section 13 validator for unemployment-verifier and military-duty detail checks.
 - 2026-04-27: Added session-only CLI runner, JSON input contract helper, and end-to-end output tests.
 - 2026-04-27: Tightened runtime schema validation with explicit type checks and CLI rejection paths.
+- 2026-04-27: Added a zero-dependency HTTP validation service, sample payload, and Render deployment config.
