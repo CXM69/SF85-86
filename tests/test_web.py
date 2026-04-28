@@ -1,6 +1,6 @@
 import unittest
 
-from sf_validator.web import _index_page, handle_request
+from sf_validator.web import _index_page, _privacy_headers, handle_request
 
 
 class WebTests(unittest.TestCase):
@@ -11,8 +11,26 @@ class WebTests(unittest.TestCase):
 
     def test_index_page_renders(self) -> None:
         html = _index_page()
-        self.assertIn("SF-85/86 Validator", html)
-        self.assertIn("textarea", html)
+        self.assertIn("SF-85 / SF-86 Validator", html)
+        self.assertIn("SF-85 Public Trust", html)
+        self.assertIn("SF-86 National Security", html)
+        self.assertIn("Validate", html)
+        self.assertIn("Clear", html)
+        self.assertIn("Review Required", html)
+        self.assertIn("section_title", html)
+        self.assertIn("screening_protocol", html)
+        self.assertNotIn("rawOutput", html)
+        self.assertIn("AbortController", html)
+        self.assertIn("activeAuditId", html)
+        self.assertIn("randomUUID", html)
+        self.assertIn("/clear-session", html)
+
+    def test_privacy_headers_disable_caching(self) -> None:
+        headers = _privacy_headers("application/json", 42)
+        self.assertEqual(headers["Cache-Control"], "no-store, no-cache, must-revalidate, max-age=0, private")
+        self.assertEqual(headers["Pragma"], "no-cache")
+        self.assertEqual(headers["Expires"], "0")
+        self.assertEqual(headers["Referrer-Policy"], "no-referrer")
 
     def test_validate_endpoint(self) -> None:
         status, body = handle_request("POST", "/validate", b'{"section_21": {"illegal_drug_use": "Yes"}}')
@@ -23,3 +41,70 @@ class WebTests(unittest.TestCase):
         status, body = handle_request("POST", "/validate", b'{"section_11": {"city": "Austin"}}')
         self.assertEqual(status, 400)
         self.assertIn("Validation error:", body["error"])
+
+    def test_validate_pdf_endpoint(self) -> None:
+        from tests.test_pdf_audit import build_simple_pdf
+
+        status, body = handle_request(
+            "POST",
+            "/validate-pdf",
+            build_simple_pdf("Section 11 Residence P.O. Box 8"),
+            headers={"X-Form-Type": "SF85", "X-Session-Id": "session-a"},
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(body["form_type"], "SF85")
+        self.assertEqual(body["findings"][0]["code"], "PDF_SECTION_11_PO_BOX")
+        self.assertIn("ledger_proof", body)
+        self.assertNotIn("findings", body["ledger_proof"])
+        self.assertEqual(len(body["ledger_proof"]["section_hashes"]), 29)
+
+    def test_validate_pdf_endpoint_honors_lowercase_form_type_header(self) -> None:
+        from tests.test_pdf_audit import build_simple_pdf
+
+        status, body = handle_request(
+            "POST",
+            "/validate-pdf",
+            build_simple_pdf("Section 21 Yes"),
+            headers={"x-form-type": "sf85"},
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(body["form_type"], "SF85")
+        self.assertEqual(body["finding_count"], 0)
+
+    def test_validate_pdf_endpoint_honors_underscore_form_type_header(self) -> None:
+        from tests.test_pdf_audit import build_simple_pdf
+
+        status, body = handle_request(
+            "POST",
+            "/validate-pdf",
+            build_simple_pdf("Section 21 Yes"),
+            headers={"x_form_type": "sf85"},
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(body["form_type"], "SF85")
+        self.assertEqual(body["finding_count"], 0)
+
+    def test_clear_session_endpoint_rotates_ledger_key(self) -> None:
+        from tests.test_pdf_audit import build_simple_pdf
+
+        status, body = handle_request(
+            "POST",
+            "/validate-pdf",
+            build_simple_pdf("Section 11 Residence P.O. Box 8"),
+            headers={"X-Form-Type": "SF85", "X-Session-Id": "session-b"},
+        )
+        self.assertEqual(status, 200)
+        first_fingerprint = body["ledger_proof"]["key_fingerprint"]
+
+        status, body = handle_request("POST", "/clear-session", headers={"X-Session-Id": "session-b"})
+        self.assertEqual(status, 200)
+        self.assertTrue(body["cleared"])
+
+        status, body = handle_request(
+            "POST",
+            "/validate-pdf",
+            build_simple_pdf("Section 11 Residence P.O. Box 8"),
+            headers={"X-Form-Type": "SF85", "X-Session-Id": "session-b"},
+        )
+        self.assertEqual(status, 200)
+        self.assertNotEqual(first_fingerprint, body["ledger_proof"]["key_fingerprint"])

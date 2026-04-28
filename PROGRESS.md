@@ -7,3 +7,20 @@
 - 2026-04-27: Tightened runtime schema validation with explicit type checks and CLI rejection paths.
 - 2026-04-27: Added a zero-dependency HTTP validation service, sample payload, and Render deployment config.
 - 2026-04-27: Added a browser UI at `/` for paste-and-validate testing without curl.
+- 2026-04-27: Added SF-85 / SF-86 form-type hot buttons and drag-and-drop PDF audit with page-based findings.
+- 2026-04-27: Simplified the reviewer UI to one form-type selector, one PDF load area, one validate action, and a review-only results panel with total flags plus section-by-section issues.
+- 2026-04-27: Added a clear-review control, fixed-height review results box, and explicit SF-85 public-trust guardrails in the PDF audit profile.
+- 2026-04-27: Added section titles to review results and started flagging SF-86 disclosure pages where a `Yes` response appears without nearby supporting detail.
+- 2026-04-27: Reworked SF-86 disclosure scan to distinguish selected Yes, selected No, and missing Yes/No selection so incomplete sections are called out directly.
+- 2026-04-27: Extended Section 23 PDF review to track subsection IDs and screen each `Entry #` block independently with its own protocol and completeness finding.
+- 2026-04-27: Fixed PDF section detection so Sections 1-10 are recognized and added generic missing-data flags for clearly unanswered early-section pages.
+- 2026-04-27: Tightened SF-86 PDF parsing for lettered subsection headers, stricter follow-up completeness checks, and repo-root test execution for the PDF endpoint.
+- 2026-04-27: Added a canonical Section 1-29 schema map and refactored the PDF audit to use schema-driven titles, entry behavior, protocols, and completeness thresholds.
+- 2026-04-27: Enriched the canonical Section 1-29 schema with expected fields per section and now surface schema-driven missing-detail guidance in incomplete-entry review messages.
+- 2026-04-27: Added section-by-section SF-86 field-label anchors and now strip prompt labels from PDF detail scoring so prompt-only follow-up pages do not clear completeness checks.
+- 2026-04-27: Hardened session privacy by removing hidden raw-result buffers from the page, deleting request-byte references after POST handling, and sending strict no-store/no-cache response headers.
+- 2026-04-27: Fixed review regressions by making Clear invalidate in-flight PDF audits, restoring case-insensitive form-type header handling, and treating ISO-formatted dates as real applicant data in early-section completeness checks.
+- 2026-04-27: Extended blank-section completeness review through Sections 12-19 so the audit no longer jumps from Section 11 straight to the Section 20 disclosure block.
+- 2026-04-27: Tightened the Section 1-29 chain by removing default section carry-forward, restricting middle-band inference, adding explicit sequence-gap findings for skipped sections, and sorting PDF findings in canonical section order.
+- 2026-04-27: Split the PDF audit into a registry-driven module pipeline with `personal_info_audit.py` (Sections 1-10), `history_audit.py` (Sections 11-13), `conduct_audit.py` (Sections 14-29), and `main.py` as the orchestrator.
+- 2026-04-27: Added a hash-only ledger proof path with SHA-256 report hashing, salted Section 1-29 hashes, ephemeral in-memory signing material, and server-side key destruction when the Clear action is triggered.
