@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 import json
-from typing import Any, Dict, Iterable, List, Mapping, Sequence, Tuple
+from typing import Any, Dict, List, Mapping, Sequence
 
 from .form_schema import get_section_schema
 from .pdf_audit import PageContext, PdfFinding
@@ -13,16 +13,13 @@ from .pdf_audit import PageContext, PdfFinding
 TRIAGE_REPORT_PATH = Path(__file__).resolve().parent.parent / "triage_report.json"
 
 
-def _section_number(section_id: str) -> int:
-    digits = "".join(char for char in section_id if char.isdigit())
-    return int(digits) if digits else 999
-
-
 def build_fatal_missing_section_findings(page_contexts: Sequence[PageContext], form_type: str) -> List[PdfFinding]:
     if form_type != "SF86":
         return []
 
     detected_sections = {context.section for context in page_contexts}
+    if not any(section != "unknown" for section in detected_sections):
+        return []
     findings: List[PdfFinding] = []
     for section_id in ("12", "13", "14"):
         if section_id in detected_sections:
@@ -50,6 +47,7 @@ def build_fatal_missing_section_findings(page_contexts: Sequence[PageContext], f
 
 def build_triage_report(page_contexts: Sequence[PageContext], findings: Sequence[PdfFinding], form_type: str) -> Dict[str, Any]:
     detected_sections = {context.section for context in page_contexts}
+    has_detected_section = any(section != "unknown" for section in detected_sections)
     findings_by_section: Dict[str, List[PdfFinding]] = {}
     for finding in findings:
         findings_by_section.setdefault(finding.section, []).append(finding)
@@ -57,7 +55,7 @@ def build_triage_report(page_contexts: Sequence[PageContext], findings: Sequence
     fatal_sections = [
         section_id
         for section_id in ("12", "13", "14")
-        if form_type == "SF86" and section_id not in detected_sections
+        if form_type == "SF86" and has_detected_section and section_id not in detected_sections
     ]
 
     sections: List[Dict[str, Any]] = []

@@ -1,6 +1,8 @@
 import unittest
+from pathlib import Path
 
 from sf_validator.pdf_audit import audit_pdf
+from sf_validator.triage import TRIAGE_REPORT_PATH
 
 
 def build_simple_pdf(page_text: str) -> bytes:
@@ -53,6 +55,10 @@ def build_multi_page_pdf(page_texts: list[str]) -> bytes:
 
 
 class PdfAuditTests(unittest.TestCase):
+    def tearDown(self) -> None:
+        if TRIAGE_REPORT_PATH.exists():
+            TRIAGE_REPORT_PATH.unlink()
+
     def test_pdf_audit_returns_findings(self) -> None:
         pdf_bytes = build_simple_pdf("Section 11 Residence P.O. Box 44 Austin TX")
         result = audit_pdf(pdf_bytes, form_type="SF85")
@@ -96,9 +102,10 @@ class PdfAuditTests(unittest.TestCase):
         codes = [finding["code"] for finding in result["findings"]]
         self.assertIn("PDF_EVER_FLAG_REVIEW_REQUIRED", codes)
         self.assertIn("PDF_EVER_FLAG_INCOMPLETE", codes)
-        self.assertEqual(result["findings"][0]["section"], "20C")
-        self.assertEqual(result["findings"][0]["section_title"], "Foreign Travel")
-        self.assertIn("Review the entry", result["findings"][0]["message"])
+        review_finding = next(f for f in result["findings"] if f["code"] == "PDF_EVER_FLAG_REVIEW_REQUIRED")
+        self.assertEqual(review_finding["section"], "20C")
+        self.assertEqual(review_finding["section_title"], "Foreign Travel")
+        self.assertIn("Review the entry", review_finding["message"])
         incomplete = next(f for f in result["findings"] if f["code"] == "PDF_EVER_FLAG_INCOMPLETE")
         self.assertIn("travel dates", incomplete["message"])
 
@@ -107,8 +114,9 @@ class PdfAuditTests(unittest.TestCase):
 
         result = audit_pdf(pdf_bytes, form_type="SF86")
 
-        self.assertEqual(result["findings"][0]["section"], "20C")
-        self.assertEqual(result["findings"][0]["subsection"], "20C.1")
+        relevant = next(f for f in result["findings"] if f["code"] == "PDF_EVER_FLAG_REVIEW_REQUIRED")
+        self.assertEqual(relevant["section"], "20C")
+        self.assertEqual(relevant["subsection"], "20C.1")
 
     def test_bare_page_number_is_not_used_as_subsection(self) -> None:
         pdf_bytes = build_simple_pdf(
@@ -126,7 +134,8 @@ class PdfAuditTests(unittest.TestCase):
 
         result = audit_pdf(pdf_bytes, form_type="SF86")
 
-        self.assertEqual(result["finding_count"], 0)
+        codes = [finding["code"] for finding in result["findings"]]
+        self.assertNotIn("PDF_EVER_FLAG_SELECTION_MISSING", codes)
 
     def test_sf86_missing_selection_requires_user_detail_not_just_labels(self) -> None:
         pdf_bytes = build_simple_pdf(
@@ -135,10 +144,9 @@ class PdfAuditTests(unittest.TestCase):
 
         result = audit_pdf(pdf_bytes, form_type="SF86")
 
-        self.assertEqual(result["finding_count"], 1)
-        self.assertEqual(result["findings"][0]["code"], "PDF_EVER_FLAG_SELECTION_MISSING")
-        self.assertEqual(result["findings"][0]["section"], "24")
-        self.assertEqual(result["findings"][0]["section_title"], "Use of Alcohol")
+        relevant = next(f for f in result["findings"] if f["code"] == "PDF_EVER_FLAG_SELECTION_MISSING")
+        self.assertEqual(relevant["section"], "24")
+        self.assertEqual(relevant["section_title"], "Use of Alcohol")
 
     def test_section23_followup_page_is_classified_and_flagged_incomplete(self) -> None:
         pdf_bytes = build_simple_pdf(
@@ -154,11 +162,12 @@ class PdfAuditTests(unittest.TestCase):
         codes = [finding["code"] for finding in result["findings"]]
         self.assertIn("PDF_SECTION_23_REVIEW_REQUIRED", codes)
         self.assertIn("PDF_SECTION_23_INCOMPLETE", codes)
-        self.assertEqual(result["findings"][0]["section"], "23")
-        self.assertEqual(result["findings"][0]["subsection"], "23.1")
-        self.assertEqual(result["findings"][0]["entry_number"], 2)
-        self.assertEqual(result["findings"][0]["screening_protocol"], "Drug Use Disclosure Review")
-        self.assertEqual(result["findings"][0]["section_title"], "Illegal Use of Drugs and Drug Activity")
+        review_finding = next(f for f in result["findings"] if f["code"] == "PDF_SECTION_23_REVIEW_REQUIRED")
+        self.assertEqual(review_finding["section"], "23")
+        self.assertEqual(review_finding["subsection"], "23.1")
+        self.assertEqual(review_finding["entry_number"], 2)
+        self.assertEqual(review_finding["screening_protocol"], "Drug Use Disclosure Review")
+        self.assertEqual(review_finding["section_title"], "Illegal Use of Drugs and Drug Activity")
 
     def test_section23_prompt_only_page_does_not_count_as_completed_detail(self) -> None:
         pdf_bytes = build_simple_pdf(
@@ -193,7 +202,7 @@ class PdfAuditTests(unittest.TestCase):
 
         entry_numbers = [finding["entry_number"] for finding in result["findings"] if finding["code"] == "PDF_SECTION_23_REVIEW_REQUIRED"]
         self.assertEqual(entry_numbers, [1, 2])
-        subsections = {finding["subsection"] for finding in result["findings"]}
+        subsections = {finding["subsection"] for finding in result["findings"] if finding["section"] == "23"}
         self.assertEqual(subsections, {"23.2"})
 
     def test_section23_single_detail_signal_still_flags_incomplete(self) -> None:
@@ -262,9 +271,9 @@ class PdfAuditTests(unittest.TestCase):
 
         result = audit_pdf(pdf_bytes, form_type="SF86")
 
-        self.assertEqual(result["findings"][0]["code"], "PDF_SECTION_DATA_MISSING")
-        self.assertEqual(result["findings"][0]["section"], "19")
-        self.assertEqual(result["findings"][0]["section_title"], "Foreign Contacts")
+        relevant = next(f for f in result["findings"] if f["section"] == "19" and f["code"] == "PDF_SECTION_DATA_MISSING")
+        self.assertEqual(relevant["section"], "19")
+        self.assertEqual(relevant["section_title"], "Foreign Contacts")
 
     def test_section12_can_be_inferred_without_literal_section_number(self) -> None:
         pdf_bytes = build_simple_pdf(
@@ -284,9 +293,9 @@ class PdfAuditTests(unittest.TestCase):
 
         result = audit_pdf(pdf_bytes, form_type="SF86")
 
-        self.assertEqual(result["findings"][0]["code"], "PDF_SECTION_DATA_MISSING")
-        self.assertEqual(result["findings"][0]["section"], "13")
-        self.assertEqual(result["findings"][0]["section_title"], "Employment Activities")
+        relevant = next(f for f in result["findings"] if f["section"] == "13" and f["code"] == "PDF_SECTION_DATA_MISSING")
+        self.assertEqual(relevant["section"], "13")
+        self.assertEqual(relevant["section_title"], "Employment Activities")
 
     def test_section14_can_be_inferred_without_literal_section_number(self) -> None:
         pdf_bytes = build_simple_pdf(
@@ -295,9 +304,37 @@ class PdfAuditTests(unittest.TestCase):
 
         result = audit_pdf(pdf_bytes, form_type="SF86")
 
-        self.assertEqual(result["findings"][0]["code"], "PDF_SECTION_DATA_MISSING")
-        self.assertEqual(result["findings"][0]["section"], "14")
-        self.assertEqual(result["findings"][0]["section_title"], "Selective Service Record")
+        relevant = next(f for f in result["findings"] if f["section"] == "14" and f["code"] == "PDF_SECTION_DATA_MISSING")
+        self.assertEqual(relevant["section"], "14")
+        self.assertEqual(relevant["section_title"], "Selective Service Record")
+
+    def test_section13_forces_lookback_for_section12(self) -> None:
+        pdf_bytes = build_multi_page_pdf(
+            [
+                "Where You Went to School Entry #1 School Name From Date To Date Degree/Diploma Address",
+                "Section 13 Employment Activities Entry #1 Employer Name From Date To Date Supervisor",
+            ]
+        )
+
+        result = audit_pdf(pdf_bytes, form_type="SF86")
+
+        relevant = next(f for f in result["findings"] if f["section"] == "12" and f["code"] == "PDF_SECTION_DATA_MISSING")
+        self.assertEqual(relevant["section_title"], "Where You Went To School")
+
+    def test_section15_forces_lookback_for_section14(self) -> None:
+        pdf_bytes = build_multi_page_pdf(
+            [
+                "Your Military History Entry #1 From Date To Date Branch of Service",
+                "Section 15 Military Record Branch From To Service Number",
+            ]
+        )
+
+        result = audit_pdf(pdf_bytes, form_type="SF86")
+
+        fatal_sections = result["triage_report"]["fatal_sections"]
+        self.assertNotIn("14", fatal_sections)
+        triage_section = next(item for item in result["triage_report"]["sections"] if item["section"] == "14")
+        self.assertNotEqual(triage_section["triage_status"], "Not Detected")
 
     def test_section8_can_be_inferred_without_literal_section_number(self) -> None:
         pdf_bytes = build_simple_pdf(
@@ -409,3 +446,63 @@ class PdfAuditTests(unittest.TestCase):
 
         sections = [finding["section"] for finding in result["findings"][:5]]
         self.assertEqual(sections[:4], ["1", "2", "3", "4"])
+
+    def test_missing_sections_12_14_throw_fatal_triage(self) -> None:
+        pdf_bytes = build_multi_page_pdf(
+            [
+                "Section 11 Residence Activities 123 Main St Austin TX",
+                "Section 15 Military Record Branch From To Service Number",
+            ]
+        )
+
+        result = audit_pdf(pdf_bytes, form_type="SF86")
+
+        fatal_sections = [finding["section"] for finding in result["findings"] if finding["code"] == "PDF_TRIAGE_FATAL_MISSING_SECTION"]
+        self.assertEqual(fatal_sections, ["12", "13", "14"])
+        self.assertTrue(result["triage_report"]["Fatal_Error"])
+        self.assertTrue(TRIAGE_REPORT_PATH.exists())
+
+    def test_section13_timeline_gap_over_30_days_is_flagged(self) -> None:
+        pdf_bytes = build_simple_pdf(
+            "Section 13 Employment Activities "
+            "Entry #1 From Date 2020-01-01 To Date 2020-02-01 Employer Name Example One Supervisor Telephone "
+            "Entry #2 From Date 2020-04-15 To Date 2020-05-01 Employer Name Example Two Supervisor Telephone"
+        )
+
+        result = audit_pdf(pdf_bytes, form_type="SF86")
+
+        codes = [finding["code"] for finding in result["findings"]]
+        self.assertIn("PDF_SECTION_12_14_TIMELINE_GAP", codes)
+
+    def test_section13_supervisor_contact_incomplete_is_flagged(self) -> None:
+        pdf_bytes = build_simple_pdf(
+            "Section 13 Employment Activities Entry #1 From Date 2020-01-01 To Date 2020-02-01 Employer Name Example Supervisor"
+        )
+
+        result = audit_pdf(pdf_bytes, form_type="SF86")
+
+        codes = [finding["code"] for finding in result["findings"]]
+        self.assertIn("PDF_SECTION_12_14_SUPERVISOR_CONTACT_INCOMPLETE", codes)
+
+    def test_section13_adverse_reason_for_leaving_is_flagged(self) -> None:
+        pdf_bytes = build_simple_pdf(
+            "Section 13 Employment Activities Entry #1 From Date 2020-01-01 To Date 2020-02-01 Employer Name Example "
+            "Supervisor Telephone Reason for Leaving fired after misconduct"
+        )
+
+        result = audit_pdf(pdf_bytes, form_type="SF86")
+
+        codes = [finding["code"] for finding in result["findings"]]
+        self.assertIn("PDF_SECTION_12_14_ADVERSE_REASON", codes)
+
+    def test_probe_style_omb_number_is_not_treated_as_date_signal(self) -> None:
+        pdf_bytes = build_simple_pdf(
+            "Section 13 Employment Activities OMB No. 3206 0005 Entry #1 Provide dates of unemployment. From Date To Date"
+        )
+
+        result = audit_pdf(pdf_bytes, form_type="SF86")
+
+        triage_sections = result["triage_report"]["sections"]
+        section13 = next(item for item in triage_sections if item["section"] == "13")
+        anomaly_codes = [anomaly["code"] for anomaly in section13["anomalies"]]
+        self.assertNotIn("PDF_SECTION_12_14_TIMELINE_GAP", anomaly_codes)

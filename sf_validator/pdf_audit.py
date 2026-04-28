@@ -88,7 +88,10 @@ def audit_pdf(pdf_bytes: bytes, form_type: str = "SF86") -> Dict[str, Any]:
     normalized_form_type = _normalize_form_type(form_type)
     reader = PdfReader(BytesIO(pdf_bytes))
     pages = [page.extract_text() or "" for page in reader.pages]
-    findings = _find_pdf_issues(pages, form_type=normalized_form_type)
+    page_contexts = _build_page_contexts(pages)
+    from .main import build_pdf_audit_outputs
+
+    findings, triage_report = build_pdf_audit_outputs(page_contexts, normalized_form_type)
     findings = sorted(findings, key=_finding_sort_key)
     return {
         "mode": "pdf",
@@ -97,6 +100,7 @@ def audit_pdf(pdf_bytes: bytes, form_type: str = "SF86") -> Dict[str, Any]:
         "page_count": len(pages),
         "finding_count": len(findings),
         "findings": [finding.to_dict() for finding in findings],
+        "triage_report": triage_report,
     }
 
 
