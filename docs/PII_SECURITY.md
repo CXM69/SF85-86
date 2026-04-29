@@ -19,6 +19,12 @@ This validator is designed for session-only review of SF-85/SF-86 material.
 - Server session material expires automatically after `SF_VALIDATOR_SESSION_TTL_SECONDS` seconds of inactivity.
 - Server startup and shutdown clear the app-specific temp directory set by `SF_VALIDATOR_TEMP_DIR`.
 
+## Access Control
+
+- Set `SF_VALIDATOR_AUTH_USERNAME` and `SF_VALIDATOR_AUTH_PASSWORD` to require HTTP Basic Auth for all non-health routes.
+- Leave both variables unset only for local, private development.
+- Use HTTPS whenever Basic Auth is enabled, because Basic Auth credentials are not encrypted without TLS.
+
 ## Operational Requirements
 
 - Run behind HTTPS when exposed beyond localhost.

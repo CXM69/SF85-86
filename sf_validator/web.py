@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import atexit
+import base64
+import hmac
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
@@ -40,6 +42,35 @@ def _privacy_headers(content_type: str, content_length: int, clear_site_data: bo
     if clear_site_data:
         headers["Clear-Site-Data"] = '"cache", "storage"'
     return headers
+
+
+def _auth_credentials() -> Tuple[str, str]:
+    return (
+        os.environ.get("SF_VALIDATOR_AUTH_USERNAME", "").strip(),
+        os.environ.get("SF_VALIDATOR_AUTH_PASSWORD", ""),
+    )
+
+
+def _auth_enabled() -> bool:
+    username, password = _auth_credentials()
+    return bool(username and password)
+
+
+def _authorized(headers: Optional[Dict[str, str]]) -> bool:
+    username, password = _auth_credentials()
+    if not username or not password:
+        return True
+    auth_value = _header_value(headers, "Authorization", "")
+    if not auth_value.lower().startswith("basic "):
+        return False
+    try:
+        decoded = base64.b64decode(auth_value.split(" ", 1)[1], validate=True).decode("utf-8")
+    except (ValueError, UnicodeDecodeError):
+        return False
+    supplied_username, separator, supplied_password = decoded.partition(":")
+    if not separator:
+        return False
+    return hmac.compare_digest(supplied_username, username) and hmac.compare_digest(supplied_password, password)
 
 
 def _json_response(status: int, payload: Dict[str, Any]) -> Tuple[int, bytes]:
@@ -694,6 +725,9 @@ class ValidatorRequestHandler(BaseHTTPRequestHandler):
     server_version = "SF86Validator/0.1"
 
     def do_GET(self) -> None:  # noqa: N802
+        if self.path != "/health" and not _authorized({key: value for key, value in self.headers.items()}):
+            self._send_unauthorized()
+            return
         if self.path == "/":
             status, body, content_type = _html_response(HTTPStatus.OK, _index_page())
             self._send_bytes(status, body, content_type)
@@ -702,6 +736,10 @@ class ValidatorRequestHandler(BaseHTTPRequestHandler):
         self._send_json(status, payload)
 
     def do_POST(self) -> None:  # noqa: N802
+        if not _authorized({key: value for key, value in self.headers.items()}):
+            self._send_unauthorized()
+            return
+
         try:
             content_length = int(self.headers.get("Content-Length", "0"))
         except ValueError:
@@ -731,6 +769,15 @@ class ValidatorRequestHandler(BaseHTTPRequestHandler):
     def _send_json(self, status: int, payload: Dict[str, Any], clear_site_data: bool = False) -> None:
         code, body = _json_response(status, payload)
         self._send_bytes(code, body, "application/json", clear_site_data=clear_site_data)
+
+    def _send_unauthorized(self) -> None:
+        code, body = _json_response(HTTPStatus.UNAUTHORIZED, {"error": "Authentication required"})
+        self.send_response(code)
+        for key, value in _privacy_headers("application/json", len(body)).items():
+            self.send_header(key, value)
+        self.send_header("WWW-Authenticate", 'Basic realm="SF-85/86 Validator", charset="UTF-8"')
+        self.end_headers()
+        self.wfile.write(body)
 
     def _send_bytes(self, status: int, body: bytes, content_type: str, clear_site_data: bool = False) -> None:
         self.send_response(status)

@@ -8,3 +8,7 @@ services:
     envVars:
       - key: PYTHON_VERSION
         value: 3.11.9
+      - key: SF_VALIDATOR_AUTH_USERNAME
+        sync: false
+      - key: SF_VALIDATOR_AUTH_PASSWORD
+        sync: false

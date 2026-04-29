@@ -1,7 +1,9 @@
+import base64
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
-from sf_validator.web import _clear_bytes, _index_page, _privacy_headers, handle_request
+from sf_validator.web import _authorized, _clear_bytes, _index_page, _privacy_headers, handle_request
 
 
 class WebTests(unittest.TestCase):
@@ -52,6 +54,24 @@ class WebTests(unittest.TestCase):
         buffer = bytearray(b"sensitive-pdf-bytes")
         _clear_bytes(buffer)
         self.assertEqual(buffer, bytearray(len(buffer)))
+
+    def test_auth_allows_requests_when_credentials_are_unset(self) -> None:
+        with patch.dict("os.environ", {}, clear=True):
+            self.assertTrue(_authorized({}))
+
+    def test_auth_requires_matching_basic_credentials(self) -> None:
+        encoded = base64.b64encode(b"reviewer:secret-pass").decode("ascii")
+        with patch.dict(
+            "os.environ",
+            {
+                "SF_VALIDATOR_AUTH_USERNAME": "reviewer",
+                "SF_VALIDATOR_AUTH_PASSWORD": "secret-pass",
+            },
+            clear=True,
+        ):
+            self.assertTrue(_authorized({"Authorization": f"Basic {encoded}"}))
+            self.assertFalse(_authorized({}))
+            self.assertFalse(_authorized({"Authorization": "Basic not-base64"}))
 
     def test_validate_endpoint(self) -> None:
         status, body = handle_request("POST", "/validate", b'{"section_21": {"illegal_drug_use": "Yes"}}')

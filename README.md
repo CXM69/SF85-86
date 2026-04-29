@@ -93,6 +93,7 @@ Important defaults:
 - responses are marked `no-store`
 - `/clear-session` returns `Clear-Site-Data: "cache", "storage"`
 - application temp cleanup is scoped to `SF_VALIDATOR_TEMP_DIR`
+- optional Basic Auth protects the site when `SF_VALIDATOR_AUTH_USERNAME` and `SF_VALIDATOR_AUTH_PASSWORD` are set
 
 ## Formal Schema Map
 
@@ -140,6 +141,8 @@ Runtime controls:
 - `SF_VALIDATOR_MAX_UPLOAD_BYTES`: PDF/JSON body limit, default `26214400`
 - `SF_VALIDATOR_SESSION_TTL_SECONDS`: in-memory session cleanup TTL, default `3600`
 - `SF_VALIDATOR_TEMP_DIR`: app-owned temp directory cleared on startup/shutdown
+- `SF_VALIDATOR_AUTH_USERNAME`: enables Basic Auth when set with password
+- `SF_VALIDATOR_AUTH_PASSWORD`: required with username to protect the site
 
 ## Render Legacy
 
