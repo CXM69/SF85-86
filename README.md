@@ -79,7 +79,20 @@ The validator can derive a ledger-safe proof from the in-memory validation repor
 - Sections `1-29` also receive salted SHA-256 hashes so the audit can be proven later without exposing section content.
 - The salt and signing key are held in memory only for the active browser session.
 - The browser `Clear` action calls the server to destroy that in-memory salt and signing key before resetting the page.
+- Browser tab close sends a best-effort cleanup beacon, and server session material expires after `SF_VALIDATOR_SESSION_TTL_SECONDS`.
 - No PDF bytes, applicant form values, or raw findings are sent in the ledger proof payload.
+
+## PII Security Boundary
+
+Detailed privacy and deployment controls are documented in
+[docs/PII_SECURITY.md](docs/PII_SECURITY.md).
+
+Important defaults:
+- uploaded PDF bytes are processed in memory only
+- request/PDF byte buffers are zeroed on a best-effort basis after validation
+- responses are marked `no-store`
+- `/clear-session` returns `Clear-Site-Data: "cache", "storage"`
+- application temp cleanup is scoped to `SF_VALIDATOR_TEMP_DIR`
 
 ## Formal Schema Map
 
@@ -93,7 +106,42 @@ The PDF audit uses this map for:
 - section-specific screening protocols
 - minimum detail thresholds before an entry is treated as complete
 
-## Render
+## Portable Website Deployment
+
+The app is now deployable as a normal containerized website without depending on
+Render-specific behavior.
+
+Build and run locally:
+
+```bash
+docker build -t sf85-86-validator .
+docker run --rm -p 8000:8000 sf85-86-validator
+```
+
+Or run the hardened local Compose profile:
+
+```bash
+docker compose up --build
+```
+
+Open:
+
+```text
+http://127.0.0.1:8000
+```
+
+For a public website, place this container behind an HTTPS reverse proxy such as
+Caddy, nginx, Traefik, Cloudflare Tunnel, or a managed container host. Do not
+enable proxy request-body logging for routes that accept PDF or JSON input.
+
+Runtime controls:
+
+- `PORT`: HTTP port, default `8000`
+- `SF_VALIDATOR_MAX_UPLOAD_BYTES`: PDF/JSON body limit, default `26214400`
+- `SF_VALIDATOR_SESSION_TTL_SECONDS`: in-memory session cleanup TTL, default `3600`
+- `SF_VALIDATOR_TEMP_DIR`: app-owned temp directory cleared on startup/shutdown
+
+## Render Legacy
 
 Deployment config is in [render.yaml](render.yaml). The service starts with:
 

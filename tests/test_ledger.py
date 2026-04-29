@@ -1,6 +1,7 @@
 import unittest
 
 from sf_validator.ledger import (
+    LedgerSessionStore,
     SECTION_IDS,
     build_ledger_payload,
     clear_all_session_material,
@@ -62,3 +63,14 @@ class LedgerTests(unittest.TestCase):
 
         self.assertEqual(cleared_count, 2)
         self.assertNotEqual(first_payload["key_fingerprint"], second_payload["key_fingerprint"])
+
+    def test_clear_expired_session_material_wipes_old_entries(self) -> None:
+        store = LedgerSessionStore()
+        store._ttl_seconds = 1
+        secrets_state = store.get_or_create("expired-session")
+        secrets_state.last_accessed -= 2
+
+        cleared_count = store.clear_expired()
+
+        self.assertEqual(cleared_count, 1)
+        self.assertFalse(store.clear("expired-session"))

@@ -1,7 +1,7 @@
 import unittest
 from pathlib import Path
 
-from sf_validator.web import _index_page, _privacy_headers, handle_request
+from sf_validator.web import _clear_bytes, _index_page, _privacy_headers, handle_request
 
 
 class WebTests(unittest.TestCase):
@@ -30,6 +30,9 @@ class WebTests(unittest.TestCase):
         self.assertIn("activeAuditId", html)
         self.assertIn("randomUUID", html)
         self.assertIn("/clear-session", html)
+        self.assertIn("sendBeacon", html)
+        self.assertIn("releaseSelectedPdfFile", html)
+        self.assertIn("new Uint8Array(pdfBuffer).fill(0)", html)
 
     def test_privacy_headers_disable_caching(self) -> None:
         headers = _privacy_headers("application/json", 42)
@@ -37,6 +40,18 @@ class WebTests(unittest.TestCase):
         self.assertEqual(headers["Pragma"], "no-cache")
         self.assertEqual(headers["Expires"], "0")
         self.assertEqual(headers["Referrer-Policy"], "no-referrer")
+        self.assertEqual(headers["X-Frame-Options"], "DENY")
+        self.assertIn("connect-src 'self'", headers["Content-Security-Policy"])
+        self.assertNotIn("Clear-Site-Data", headers)
+
+    def test_clear_session_headers_clear_browser_storage(self) -> None:
+        headers = _privacy_headers("application/json", 20, clear_site_data=True)
+        self.assertEqual(headers["Clear-Site-Data"], '"cache", "storage"')
+
+    def test_clear_bytes_zeroes_request_buffer(self) -> None:
+        buffer = bytearray(b"sensitive-pdf-bytes")
+        _clear_bytes(buffer)
+        self.assertEqual(buffer, bytearray(len(buffer)))
 
     def test_validate_endpoint(self) -> None:
         status, body = handle_request("POST", "/validate", b'{"section_21": {"illegal_drug_use": "Yes"}}')
@@ -112,6 +127,31 @@ class WebTests(unittest.TestCase):
             "/validate-pdf",
             build_simple_pdf("Section 11 Residence P.O. Box 8"),
             headers={"X-Form-Type": "SF85", "X-Session-Id": "session-b"},
+        )
+        self.assertEqual(status, 200)
+        self.assertNotEqual(first_fingerprint, body["ledger_proof"]["key_fingerprint"])
+
+    def test_clear_session_endpoint_accepts_beacon_body(self) -> None:
+        from tests.test_pdf_audit import build_simple_pdf
+
+        status, body = handle_request(
+            "POST",
+            "/validate-pdf",
+            build_simple_pdf("Section 11 Residence P.O. Box 8"),
+            headers={"X-Form-Type": "SF85", "X-Session-Id": "session-c"},
+        )
+        self.assertEqual(status, 200)
+        first_fingerprint = body["ledger_proof"]["key_fingerprint"]
+
+        status, body = handle_request("POST", "/clear-session", b"session-c")
+        self.assertEqual(status, 200)
+        self.assertTrue(body["cleared"])
+
+        status, body = handle_request(
+            "POST",
+            "/validate-pdf",
+            build_simple_pdf("Section 11 Residence P.O. Box 8"),
+            headers={"X-Form-Type": "SF85", "X-Session-Id": "session-c"},
         )
         self.assertEqual(status, 200)
         self.assertNotEqual(first_fingerprint, body["ledger_proof"]["key_fingerprint"])

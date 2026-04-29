@@ -7,17 +7,24 @@ from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import os
+from pathlib import Path
+import re
+import shutil
 import signal
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, Optional, Tuple, Union
 
 from .cli import run_validation
-from .ledger import build_ledger_payload, clear_all_session_material, clear_session_material
+from .ledger import build_ledger_payload, clear_all_session_material, clear_expired_session_material, clear_session_material
 from .pdf_audit import audit_pdf
 from .schema import SchemaValidationError, input_schema
 
 
-def _privacy_headers(content_type: str, content_length: int) -> Dict[str, str]:
-    return {
+DEFAULT_MAX_UPLOAD_BYTES = 25 * 1024 * 1024
+SESSION_ID_RE = re.compile(r"^[A-Za-z0-9._:-]{1,128}$")
+
+
+def _privacy_headers(content_type: str, content_length: int, clear_site_data: bool = False) -> Dict[str, str]:
+    headers = {
         "Content-Type": content_type,
         "Content-Length": str(content_length),
         "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0, private",
@@ -25,7 +32,14 @@ def _privacy_headers(content_type: str, content_length: int) -> Dict[str, str]:
         "Expires": "0",
         "Referrer-Policy": "no-referrer",
         "X-Content-Type-Options": "nosniff",
+        "X-Frame-Options": "DENY",
+        "Cross-Origin-Opener-Policy": "same-origin",
+        "Permissions-Policy": "camera=(), microphone=(), geolocation=(), payment=(), usb=()",
+        "Content-Security-Policy": "default-src 'self'; base-uri 'none'; connect-src 'self'; form-action 'none'; frame-ancestors 'none'; img-src 'self' data:; object-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'",
     }
+    if clear_site_data:
+        headers["Clear-Site-Data"] = '"cache", "storage"'
+    return headers
 
 
 def _json_response(status: int, payload: Dict[str, Any]) -> Tuple[int, bytes]:
@@ -39,6 +53,41 @@ def _html_response(status: int, body: str) -> Tuple[int, bytes, str]:
 
 def _cleanup_server_state() -> None:
     clear_all_session_material()
+    _clear_private_temp_dir(create=False)
+
+
+def _max_request_body_bytes() -> int:
+    raw_value = os.environ.get("SF_VALIDATOR_MAX_UPLOAD_BYTES", str(DEFAULT_MAX_UPLOAD_BYTES))
+    try:
+        return max(1, int(raw_value))
+    except ValueError:
+        return DEFAULT_MAX_UPLOAD_BYTES
+
+
+def _clear_bytes(buffer: bytearray) -> None:
+    for index in range(len(buffer)):
+        buffer[index] = 0
+
+
+def _private_temp_dir() -> Optional[Path]:
+    configured = os.environ.get("SF_VALIDATOR_TEMP_DIR", "").strip()
+    if not configured:
+        return None
+    path = Path(configured).expanduser().resolve()
+    unsafe_paths = {Path("/").resolve(), Path("/tmp").resolve(), Path.home().resolve()}
+    if path in unsafe_paths:
+        raise RuntimeError("SF_VALIDATOR_TEMP_DIR must point to an app-specific directory")
+    return path
+
+
+def _clear_private_temp_dir(create: bool) -> None:
+    path = _private_temp_dir()
+    if path is None:
+        return
+    shutil.rmtree(path, ignore_errors=True)
+    if create:
+        path.mkdir(mode=0o700, parents=True, exist_ok=True)
+        os.environ["TMPDIR"] = str(path)
 
 
 def _index_page() -> str:
@@ -403,24 +452,29 @@ def _index_page() -> str:
     }
 
     async function callPdfAudit(file, formType, signal) {
-      const response = await fetch('/validate-pdf', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/pdf',
-          'X-Form-Type': formType,
-          'X-Session-Id': activeSessionId
-        },
-        body: await file.arrayBuffer(),
-        signal
-      });
-      const text = await response.text();
-      let parsed;
+      const pdfBuffer = await file.arrayBuffer();
       try {
-        parsed = JSON.parse(text);
-      } catch {
-        parsed = { raw: text };
+        const response = await fetch('/validate-pdf', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/pdf',
+            'X-Form-Type': formType,
+            'X-Session-Id': activeSessionId
+          },
+          body: pdfBuffer,
+          signal
+        });
+        const text = await response.text();
+        let parsed;
+        try {
+          parsed = JSON.parse(text);
+        } catch {
+          parsed = { raw: text };
+        }
+        return { ok: response.ok, status: response.status, body: parsed };
+      } finally {
+        new Uint8Array(pdfBuffer).fill(0);
       }
-      return { ok: response.ok, status: response.status, body: parsed };
     }
 
     async function clearServerSession() {
@@ -460,6 +514,12 @@ def _index_page() -> str:
           </div>
         `;
       }).join('');
+    }
+
+    function releaseSelectedPdfFile(message = 'PDF released from browser memory after validation.') {
+      selectedPdfFile = null;
+      pdfFile.value = '';
+      fileName.textContent = message;
     }
 
     async function clearReviewSession() {
@@ -511,6 +571,7 @@ def _index_page() -> str:
         if (error && error.name === 'AbortError') {
           return;
         }
+        releaseSelectedPdfFile('PDF released from browser memory after failed validation.');
         setStatus('Validation failed.', 'bad');
         reviewList.innerHTML = '<div class="review-item"><div class="review-item-title">Request Error</div><div>Unable to complete PDF validation.</div></div>';
         return;
@@ -524,15 +585,23 @@ def _index_page() -> str:
       activeAuditController = null;
 
       if (!result.ok) {
+        releaseSelectedPdfFile('PDF released from browser memory after failed validation.');
         setStatus('Validation failed.', 'bad');
         reviewList.innerHTML = `<div class="review-item"><div class="review-item-title">Request Error</div><div>${result.body.error || 'Unknown error'}</div></div>`;
         return;
       }
 
+      releaseSelectedPdfFile();
       const findings = result.body.findings || [];
       totalFlags.textContent = String(result.body.finding_count || findings.length);
       renderReviewItems(findings);
       setStatus(`Validation complete for ${requestFormType}.`, 'good');
+    }
+
+    function clearSessionOnPageHide() {
+      if (navigator.sendBeacon) {
+        navigator.sendBeacon('/clear-session', activeSessionId);
+      }
     }
 
     sf85Btn.addEventListener('click', () => setFormType('SF85'));
@@ -541,6 +610,7 @@ def _index_page() -> str:
     clearBtn.addEventListener('click', () => {
       void clearReviewSession();
     });
+    window.addEventListener('pagehide', clearSessionOnPageHide);
     pdfFile.addEventListener('change', () => {
       setSelectedFile(pdfFile.files && pdfFile.files[0] ? pdfFile.files[0] : null);
     });
@@ -581,8 +651,16 @@ def _header_value(headers: Optional[Dict[str, str]], name: str, default: str = "
     return normalized_headers.get(normalized_name, default)
 
 
-def handle_request(method: str, path: str, body: bytes = b"", headers: Optional[Dict[str, str]] = None) -> Tuple[int, Dict[str, Any]]:
+def _session_id(headers: Dict[str, str], body: Union[bytes, bytearray] = b"") -> str:
+    raw_session_id = _header_value(headers, "X-Session-Id", "")
+    if not raw_session_id and body:
+        raw_session_id = bytes(body).decode("utf-8", errors="ignore").strip()
+    return raw_session_id if SESSION_ID_RE.fullmatch(raw_session_id) else ""
+
+
+def handle_request(method: str, path: str, body: Union[bytes, bytearray] = b"", headers: Optional[Dict[str, str]] = None) -> Tuple[int, Dict[str, Any]]:
     headers = headers or {}
+    clear_expired_session_material()
     if method == "GET" and path == "/health":
         return HTTPStatus.OK, {"status": "ok"}
     if method == "GET" and path == "/schema":
@@ -599,14 +677,14 @@ def handle_request(method: str, path: str, body: bytes = b"", headers: Optional[
     if method == "POST" and path == "/validate-pdf":
         try:
             result = audit_pdf(body, form_type=_header_value(headers, "X-Form-Type", "SF86"))
-            session_id = _header_value(headers, "X-Session-Id", "")
+            session_id = _session_id(headers)
             if session_id:
                 result["ledger_proof"] = build_ledger_payload(result, session_id)
         except Exception as exc:
             return HTTPStatus.BAD_REQUEST, {"error": f"PDF audit error: {exc}"}
         return HTTPStatus.OK, result
     if method == "POST" and path == "/clear-session":
-        session_id = _header_value(headers, "X-Session-Id", "")
+        session_id = _session_id(headers, body)
         cleared = clear_session_material(session_id) if session_id else False
         return HTTPStatus.OK, {"cleared": cleared}
     return HTTPStatus.NOT_FOUND, {"error": "Not found"}
@@ -630,28 +708,40 @@ class ValidatorRequestHandler(BaseHTTPRequestHandler):
             self._send_json(HTTPStatus.BAD_REQUEST, {"error": "Invalid Content-Length"})
             return
 
-        raw = self.rfile.read(content_length)
-        status, payload = handle_request("POST", self.path, raw, headers={key: value for key, value in self.headers.items()})
-        del raw
-        self._send_json(status, payload)
+        if content_length > _max_request_body_bytes():
+            self.close_connection = True
+            self._send_json(
+                HTTPStatus.REQUEST_ENTITY_TOO_LARGE,
+                {"error": "Request body exceeds the configured upload limit"},
+            )
+            return
+
+        raw = bytearray(self.rfile.read(content_length))
+        try:
+            status, payload = handle_request("POST", self.path, raw, headers={key: value for key, value in self.headers.items()})
+        finally:
+            _clear_bytes(raw)
+            del raw
+        self._send_json(status, payload, clear_site_data=self.path == "/clear-session")
 
     def log_message(self, format: str, *args: object) -> None:
         """Suppress request logging to avoid copying request payload context to logs."""
         return
 
-    def _send_json(self, status: int, payload: Dict[str, Any]) -> None:
+    def _send_json(self, status: int, payload: Dict[str, Any], clear_site_data: bool = False) -> None:
         code, body = _json_response(status, payload)
-        self._send_bytes(code, body, "application/json")
+        self._send_bytes(code, body, "application/json", clear_site_data=clear_site_data)
 
-    def _send_bytes(self, status: int, body: bytes, content_type: str) -> None:
+    def _send_bytes(self, status: int, body: bytes, content_type: str, clear_site_data: bool = False) -> None:
         self.send_response(status)
-        for key, value in _privacy_headers(content_type, len(body)).items():
+        for key, value in _privacy_headers(content_type, len(body), clear_site_data=clear_site_data).items():
             self.send_header(key, value)
         self.end_headers()
         self.wfile.write(body)
 
 
 def serve() -> None:
+    _clear_private_temp_dir(create=True)
     port = int(os.environ.get("PORT", "8000"))
     httpd = ThreadingHTTPServer(("0.0.0.0", port), ValidatorRequestHandler)
     atexit.register(_cleanup_server_state)

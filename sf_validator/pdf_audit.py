@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from io import BytesIO
 import re
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 
 from pypdf import PdfReader
 from .form_schema import SECTION_SCHEMAS, SectionSchema, get_section_schema
@@ -84,24 +84,40 @@ class PageContext:
     snippet: str
 
 
-def audit_pdf(pdf_bytes: bytes, form_type: str = "SF86") -> Dict[str, Any]:
-    normalized_form_type = _normalize_form_type(form_type)
-    reader = PdfReader(BytesIO(pdf_bytes))
-    pages = [page.extract_text() or "" for page in reader.pages]
-    page_contexts = _build_page_contexts(pages)
-    from .main import build_pdf_audit_outputs
+PdfBytes = Union[bytes, bytearray, memoryview]
 
-    findings, triage_report = build_pdf_audit_outputs(page_contexts, normalized_form_type)
-    findings = sorted(findings, key=_finding_sort_key)
-    return {
-        "mode": "pdf",
-        "form_type": normalized_form_type,
-        "review_profile": _review_profile(normalized_form_type),
-        "page_count": len(pages),
-        "finding_count": len(findings),
-        "findings": [finding.to_dict() for finding in findings],
-        "triage_report": triage_report,
-    }
+
+def audit_pdf(pdf_bytes: PdfBytes, form_type: str = "SF86") -> Dict[str, Any]:
+    normalized_form_type = _normalize_form_type(form_type)
+    pdf_buffer = BytesIO(pdf_bytes)
+    try:
+        reader = PdfReader(pdf_buffer)
+        pages = [page.extract_text() or "" for page in reader.pages]
+        page_contexts = _build_page_contexts(pages)
+        from .main import build_pdf_audit_outputs
+
+        findings, triage_report = build_pdf_audit_outputs(page_contexts, normalized_form_type)
+        findings = sorted(findings, key=_finding_sort_key)
+        return {
+            "mode": "pdf",
+            "form_type": normalized_form_type,
+            "review_profile": _review_profile(normalized_form_type),
+            "page_count": len(pages),
+            "finding_count": len(findings),
+            "findings": [finding.to_dict() for finding in findings],
+            "triage_report": triage_report,
+        }
+    finally:
+        _clear_pdf_buffer(pdf_buffer)
+
+
+def _clear_pdf_buffer(pdf_buffer: BytesIO) -> None:
+    view = pdf_buffer.getbuffer()
+    try:
+        view[:] = b"\x00" * len(view)
+    finally:
+        view.release()
+        pdf_buffer.close()
 
 
 def _find_pdf_issues(page_texts: List[str], form_type: str) -> List[PdfFinding]:

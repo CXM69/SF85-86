@@ -7,12 +7,15 @@ from datetime import datetime, timezone
 import hashlib
 import hmac
 import json
+import os
 import secrets
 import threading
-from typing import Any, Dict, Mapping, MutableMapping
+import time
+from typing import Any, Dict, Mapping
 
 
 SECTION_IDS = tuple(str(number) for number in range(1, 30))
+DEFAULT_SESSION_TTL_SECONDS = 60 * 60
 
 
 def _canonical_json(value: Any) -> bytes:
@@ -32,6 +35,7 @@ def _zeroize(buffer: bytearray) -> None:
 class _SessionSecrets:
     salt: bytearray
     signing_key: bytearray
+    last_accessed: float
 
     @property
     def key_fingerprint(self) -> str:
@@ -48,16 +52,21 @@ class LedgerSessionStore:
     def __init__(self) -> None:
         self._lock = threading.Lock()
         self._sessions: Dict[str, _SessionSecrets] = {}
+        self._ttl_seconds = _session_ttl_seconds()
 
     def get_or_create(self, session_id: str) -> _SessionSecrets:
         with self._lock:
+            self._clear_expired_locked()
             secrets_state = self._sessions.get(session_id)
             if secrets_state is None:
                 secrets_state = _SessionSecrets(
                     salt=bytearray(secrets.token_bytes(32)),
                     signing_key=bytearray(secrets.token_bytes(32)),
+                    last_accessed=time.monotonic(),
                 )
                 self._sessions[session_id] = secrets_state
+            else:
+                secrets_state.last_accessed = time.monotonic()
             return secrets_state
 
     def clear(self, session_id: str) -> bool:
@@ -75,6 +84,31 @@ class LedgerSessionStore:
         for secrets_state in sessions:
             secrets_state.clear()
         return len(sessions)
+
+    def clear_expired(self) -> int:
+        with self._lock:
+            return self._clear_expired_locked()
+
+    def _clear_expired_locked(self) -> int:
+        if self._ttl_seconds <= 0:
+            return 0
+        cutoff = time.monotonic() - self._ttl_seconds
+        expired_ids = [
+            session_id
+            for session_id, secrets_state in self._sessions.items()
+            if secrets_state.last_accessed < cutoff
+        ]
+        for session_id in expired_ids:
+            self._sessions.pop(session_id).clear()
+        return len(expired_ids)
+
+
+def _session_ttl_seconds() -> int:
+    raw_value = os.environ.get("SF_VALIDATOR_SESSION_TTL_SECONDS", str(DEFAULT_SESSION_TTL_SECONDS))
+    try:
+        return max(0, int(raw_value))
+    except ValueError:
+        return DEFAULT_SESSION_TTL_SECONDS
 
 
 SESSION_STORE = LedgerSessionStore()
@@ -134,3 +168,7 @@ def clear_session_material(session_id: str) -> bool:
 
 def clear_all_session_material() -> int:
     return SESSION_STORE.clear_all()
+
+
+def clear_expired_session_material() -> int:
+    return SESSION_STORE.clear_expired()
