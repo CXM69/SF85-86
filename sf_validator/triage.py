@@ -2,15 +2,10 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-import json
 from typing import Any, Dict, List, Mapping, Sequence
 
 from .form_schema import get_section_schema
 from .pdf_audit import PageContext, PdfFinding
-
-
-TRIAGE_REPORT_PATH = Path(__file__).resolve().parent.parent / "triage_report.json"
 
 
 def build_fatal_missing_section_findings(page_contexts: Sequence[PageContext], form_type: str) -> List[PdfFinding]:
@@ -108,5 +103,4 @@ def build_triage_report(page_contexts: Sequence[PageContext], findings: Sequence
         "Manual_Review_Required": manual_review_required,
         "sections": sections,
     }
-    TRIAGE_REPORT_PATH.write_text(json.dumps(report, indent=2), encoding="utf-8")
     return report

@@ -5,7 +5,13 @@ from .exporter import build_export_summary
 from .flag_generator import FlagGenerator
 from .form_schema import SECTION_SCHEMAS, SectionSchema, get_section_schema
 from .gap_engine import GapEngine
-from .ledger import build_ledger_payload, build_report_hash, build_section_hashes, clear_session_material
+from .ledger import (
+    build_ledger_payload,
+    build_report_hash,
+    build_section_hashes,
+    clear_all_session_material,
+    clear_session_material,
+)
 from .models import ValidationFlag
 from .pdf_audit import audit_pdf
 from .schema import SchemaValidationError, input_schema, validate_payload
@@ -20,6 +26,7 @@ __all__ = [
     "build_ledger_payload",
     "build_report_hash",
     "build_section_hashes",
+    "clear_all_session_material",
     "clear_session_material",
     "SectionSchema",
     "SECTION_SCHEMAS",

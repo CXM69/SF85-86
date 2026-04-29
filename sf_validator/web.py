@@ -2,14 +2,16 @@
 
 from __future__ import annotations
 
+import atexit
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import os
+import signal
 from typing import Any, Dict, Optional, Tuple
 
 from .cli import run_validation
-from .ledger import build_ledger_payload, clear_session_material
+from .ledger import build_ledger_payload, clear_all_session_material, clear_session_material
 from .pdf_audit import audit_pdf
 from .schema import SchemaValidationError, input_schema
 
@@ -33,6 +35,10 @@ def _json_response(status: int, payload: Dict[str, Any]) -> Tuple[int, bytes]:
 
 def _html_response(status: int, body: str) -> Tuple[int, bytes, str]:
     return status, body.encode("utf-8"), "text/html; charset=utf-8"
+
+
+def _cleanup_server_state() -> None:
+    clear_all_session_material()
 
 
 def _index_page() -> str:
@@ -234,8 +240,8 @@ def _index_page() -> str:
       border-radius: 18px;
       background: linear-gradient(180deg, #fcfdff 0%, #f3f7fc 100%);
       padding: 18px;
-      min-height: 142px;
-      max-height: 220px;
+      min-height: 320px;
+      max-height: 420px;
       overflow: auto;
     }
     .review-box h3 {
@@ -648,8 +654,13 @@ class ValidatorRequestHandler(BaseHTTPRequestHandler):
 def serve() -> None:
     port = int(os.environ.get("PORT", "8000"))
     httpd = ThreadingHTTPServer(("0.0.0.0", port), ValidatorRequestHandler)
+    atexit.register(_cleanup_server_state)
+    signal.signal(signal.SIGTERM, lambda _signum, _frame: (_cleanup_server_state(), httpd.shutdown()))
     print("Serving SF-85/86 validator on port %s" % port)
-    httpd.serve_forever()
+    try:
+        httpd.serve_forever()
+    finally:
+        _cleanup_server_state()
 
 
 if __name__ == "__main__":

@@ -27,6 +27,8 @@ ADVERSE_REASON_RE = re.compile(
     r"\b(?:fired|terminated|misconduct|disciplinary|resigned\s+in\s+lieu|forced\s+to\s+resign|quit\s+after\s+warning|suspended)\b",
     re.IGNORECASE,
 )
+SELECTIVE_SERVICE_NUMBER_RE = re.compile(r"\b[a-z0-9-]{4,}\b", re.IGNORECASE)
+YEAR_RE = re.compile(r"\b(19[6-9]\d|20\d{2})\b")
 FROM_DATE_LABEL_RE = re.compile(r"\bfrom\s+date\b", re.IGNORECASE)
 TO_DATE_LABEL_RE = re.compile(r"\bto\s+date\b", re.IGNORECASE)
 PRESENT_RE = re.compile(r"\bpresent\b", re.IGNORECASE)
@@ -134,6 +136,7 @@ class EmploymentEduLogic:
         findings.extend(self._timeline_gap_findings(page_contexts))
         findings.extend(self._supervisor_contact_findings(page_contexts))
         findings.extend(self._adverse_reason_findings(page_contexts))
+        findings.extend(self._selective_service_findings(page_contexts))
         return findings
 
     def _timeline_gap_findings(self, page_contexts: List[PageContext]) -> List[PdfFinding]:
@@ -269,6 +272,40 @@ class EmploymentEduLogic:
                 )
         return findings
 
+    def _selective_service_findings(self, page_contexts: List[PageContext]) -> List[PdfFinding]:
+        findings: List[PdfFinding] = []
+
+        for context in page_contexts:
+            if context.section != "14":
+                continue
+            normalized = _normalize_probe_text(context.text)
+            lower = normalized.lower()
+            if "registration number" not in lower and "www.sss.gov" not in lower:
+                continue
+            if not _requires_selective_service_registration(lower):
+                continue
+            if _has_selective_service_number(lower):
+                continue
+            findings.append(
+                PdfFinding(
+                    code="PDF_SECTION_14_SELECTIVE_SERVICE_MISSING",
+                    severity="high",
+                    section=context.section,
+                    subsection=context.subsection,
+                    section_title=context.section_title,
+                    entry_number=context.entry_number,
+                    screening_protocol="Selective Service Registration Review",
+                    page=context.page,
+                    message=(
+                        "Potential Section 14 issue: the applicant appears to require a Selective Service registration number, "
+                        "but no clear number was detected. Manual review is required."
+                    ),
+                    snippet=context.snippet,
+                )
+            )
+
+        return findings
+
 
 def _normalize_probe_text(text: str) -> str:
     normalized = " ".join(text.split())
@@ -321,3 +358,40 @@ def _extract_from_to_dates(text: str) -> Optional[Tuple[date, Optional[date]]]:
         return None
     to_date = _first_date_after(TO_DATE_LABEL_RE, normalized)
     return from_date, to_date
+
+
+def _requires_selective_service_registration(text: str) -> bool:
+    if "female" in text:
+        return False
+    if "male" in text:
+        years = [int(match) for match in YEAR_RE.findall(text)]
+        if any(year >= 1960 for year in years):
+            return True
+    if "born after december 31, 1959" in text:
+        return True
+    return False
+
+
+def _has_selective_service_number(text: str) -> bool:
+    if "registration number" not in text:
+        return False
+    tail = text.split("registration number", 1)[1][:120]
+    for stop_marker in ("www.sss.gov", "www sss gov", "born after", "provide explanation"):
+        marker_index = tail.find(stop_marker)
+        if marker_index != -1:
+            tail = tail[:marker_index]
+            break
+    candidates = [token for token in re.split(r"[^a-z0-9-]+", tail) if token]
+    stop_words = {"www", "sss", "gov", "provide", "explanation", "section", "entry", "yes", "no"}
+    for candidate in candidates:
+        if candidate in stop_words:
+            continue
+        if candidate.isdigit() and len(candidate) < 8:
+            continue
+        if candidate.isdigit() and len(candidate) == 4 and 1900 <= int(candidate) <= 2100:
+            continue
+        if not any(char.isdigit() for char in candidate):
+            continue
+        if SELECTIVE_SERVICE_NUMBER_RE.fullmatch(candidate):
+            return True
+    return False

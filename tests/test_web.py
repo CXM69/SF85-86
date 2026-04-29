@@ -1,9 +1,15 @@
 import unittest
+from pathlib import Path
 
 from sf_validator.web import _index_page, _privacy_headers, handle_request
 
 
 class WebTests(unittest.TestCase):
+    def tearDown(self) -> None:
+        triage_path = Path("/Users/mountainman/SF85-86/triage_report.json")
+        if triage_path.exists():
+            triage_path.unlink()
+
     def test_health_endpoint(self) -> None:
         status, body = handle_request("GET", "/health")
         self.assertEqual(status, 200)
@@ -57,6 +63,7 @@ class WebTests(unittest.TestCase):
         self.assertIn("ledger_proof", body)
         self.assertNotIn("findings", body["ledger_proof"])
         self.assertEqual(len(body["ledger_proof"]["section_hashes"]), 29)
+        self.assertFalse(Path("/Users/mountainman/SF85-86/triage_report.json").exists())
 
     def test_validate_pdf_endpoint_honors_lowercase_form_type_header(self) -> None:
         from tests.test_pdf_audit import build_simple_pdf

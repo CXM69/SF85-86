@@ -68,6 +68,14 @@ class LedgerSessionStore:
         secrets_state.clear()
         return True
 
+    def clear_all(self) -> int:
+        with self._lock:
+            sessions = list(self._sessions.values())
+            self._sessions.clear()
+        for secrets_state in sessions:
+            secrets_state.clear()
+        return len(sessions)
+
 
 SESSION_STORE = LedgerSessionStore()
 
@@ -122,3 +130,7 @@ def build_ledger_payload(report: Mapping[str, Any], session_id: str) -> Dict[str
 
 def clear_session_material(session_id: str) -> bool:
     return SESSION_STORE.clear(session_id)
+
+
+def clear_all_session_material() -> int:
+    return SESSION_STORE.clear_all()

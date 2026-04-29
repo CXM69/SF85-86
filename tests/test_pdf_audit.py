@@ -1,8 +1,6 @@
 import unittest
-from pathlib import Path
 
 from sf_validator.pdf_audit import audit_pdf
-from sf_validator.triage import TRIAGE_REPORT_PATH
 
 
 def build_simple_pdf(page_text: str) -> bytes:
@@ -55,10 +53,6 @@ def build_multi_page_pdf(page_texts: list[str]) -> bytes:
 
 
 class PdfAuditTests(unittest.TestCase):
-    def tearDown(self) -> None:
-        if TRIAGE_REPORT_PATH.exists():
-            TRIAGE_REPORT_PATH.unlink()
-
     def test_pdf_audit_returns_findings(self) -> None:
         pdf_bytes = build_simple_pdf("Section 11 Residence P.O. Box 44 Austin TX")
         result = audit_pdf(pdf_bytes, form_type="SF85")
@@ -324,8 +318,8 @@ class PdfAuditTests(unittest.TestCase):
     def test_section15_forces_lookback_for_section14(self) -> None:
         pdf_bytes = build_multi_page_pdf(
             [
-                "Your Military History Entry #1 From Date To Date Branch of Service",
-                "Section 15 Military Record Branch From To Service Number",
+                "Registration Number www.sss.gov born after December 31, 1959 male",
+                "Section 15 EVER served Branch of Service From Date To Date Type of Discharge",
             ]
         )
 
@@ -335,6 +329,53 @@ class PdfAuditTests(unittest.TestCase):
         self.assertNotIn("14", fatal_sections)
         triage_section = next(item for item in result["triage_report"]["sections"] if item["section"] == "14")
         self.assertNotEqual(triage_section["triage_status"], "Not Detected")
+
+    def test_section14_missing_selective_service_number_is_flagged(self) -> None:
+        pdf_bytes = build_simple_pdf(
+            "Section 14 Selective Service Record registration number www.sss.gov male born after December 31, 1959"
+        )
+
+        result = audit_pdf(pdf_bytes, form_type="SF86")
+
+        codes = [finding["code"] for finding in result["findings"] if finding["section"] == "14"]
+        self.assertIn("PDF_SECTION_14_SELECTIVE_SERVICE_MISSING", codes)
+
+    def test_section15_non_honorable_discharge_triggers_anomaly(self) -> None:
+        pdf_bytes = build_simple_pdf(
+            "Section 15 Your Military History EVER served Branch of Service Army From Date 2010-01-01 To Date 2012-01-01 Type of Discharge General"
+        )
+
+        result = audit_pdf(pdf_bytes, form_type="SF86")
+
+        codes = [finding["code"] for finding in result["findings"] if finding["section"] == "15"]
+        self.assertIn("PDF_SECTION_15_DISCHARGE_ANOMALY", codes)
+
+    def test_page_with_section14_and_section15_is_split_into_two_contexts(self) -> None:
+        pdf_bytes = build_simple_pdf(
+            "Section 14 Selective Service Record registration number www.sss.gov male born after December 31, 1959 "
+            "Section 15 Your Military History EVER served Branch of Service Army From Date 2010-01-01 "
+            "To Date 2012-01-01 Type of Discharge General"
+        )
+
+        result = audit_pdf(pdf_bytes, form_type="SF86")
+
+        section14_codes = [finding["code"] for finding in result["findings"] if finding["section"] == "14"]
+        section15_codes = [finding["code"] for finding in result["findings"] if finding["section"] == "15"]
+        self.assertIn("PDF_SECTION_14_SELECTIVE_SERVICE_MISSING", section14_codes)
+        self.assertIn("PDF_SECTION_15_DISCHARGE_ANOMALY", section15_codes)
+
+    def test_section15_concurrent_full_time_employment_is_flagged(self) -> None:
+        pdf_bytes = build_multi_page_pdf(
+            [
+                "Section 13 Employment Activities Entry #1 Full-time Employer Name Example From Date 2010-01-01 To Date 2012-06-01 Supervisor Telephone",
+                "Section 15 Your Military History Entry #1 EVER served Branch of Service Army From Date 2011-01-01 To Date 2013-01-01 Type of Discharge Honorable",
+            ]
+        )
+
+        result = audit_pdf(pdf_bytes, form_type="SF86")
+
+        codes = [finding["code"] for finding in result["findings"] if finding["section"] == "15"]
+        self.assertIn("PDF_SECTION_15_CONCURRENT_ACTIVITY", codes)
 
     def test_section8_can_be_inferred_without_literal_section_number(self) -> None:
         pdf_bytes = build_simple_pdf(
@@ -460,7 +501,6 @@ class PdfAuditTests(unittest.TestCase):
         fatal_sections = [finding["section"] for finding in result["findings"] if finding["code"] == "PDF_TRIAGE_FATAL_MISSING_SECTION"]
         self.assertEqual(fatal_sections, ["12", "13", "14"])
         self.assertTrue(result["triage_report"]["Fatal_Error"])
-        self.assertTrue(TRIAGE_REPORT_PATH.exists())
 
     def test_section13_timeline_gap_over_30_days_is_flagged(self) -> None:
         pdf_bytes = build_simple_pdf(

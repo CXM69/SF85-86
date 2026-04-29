@@ -16,7 +16,8 @@ SECTION12_PATTERNS = (
 )
 SECTION14_PATTERNS = (
     re.compile(r"\bsection\s*14\b", re.IGNORECASE),
-    re.compile(r"\byour military history\b", re.IGNORECASE),
+    re.compile(r"\bregistration number\b", re.IGNORECASE),
+    re.compile(r"\bwww\.?sss\.gov\b", re.IGNORECASE),
 )
 SECTION13_PATTERNS = (
     re.compile(r"\bsection\s*13\b", re.IGNORECASE),
@@ -25,6 +26,8 @@ SECTION13_PATTERNS = (
 )
 SECTION15_PATTERNS = (
     re.compile(r"\bsection\s*15\b", re.IGNORECASE),
+    re.compile(r"\bever served\b", re.IGNORECASE),
+    re.compile(r"\bbranch of service\b", re.IGNORECASE),
     re.compile(r"\bmilitary record\b", re.IGNORECASE),
 )
 

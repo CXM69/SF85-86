@@ -1,6 +1,11 @@
 import unittest
 
-from sf_validator.ledger import SECTION_IDS, build_ledger_payload, clear_session_material
+from sf_validator.ledger import (
+    SECTION_IDS,
+    build_ledger_payload,
+    clear_all_session_material,
+    clear_session_material,
+)
 
 
 class LedgerTests(unittest.TestCase):
@@ -46,3 +51,14 @@ class LedgerTests(unittest.TestCase):
         self.assertTrue(cleared)
         self.assertNotEqual(first_payload["key_fingerprint"], second_payload["key_fingerprint"])
         self.assertNotEqual(first_payload["section_hashes"], second_payload["section_hashes"])
+
+    def test_clear_all_session_material_wipes_store(self) -> None:
+        report = {"form_type": "SF85", "finding_count": 0, "findings": []}
+
+        first_payload = build_ledger_payload(report, "test-session")
+        build_ledger_payload(report, "other-session")
+        cleared_count = clear_all_session_material()
+        second_payload = build_ledger_payload(report, "test-session")
+
+        self.assertEqual(cleared_count, 2)
+        self.assertNotEqual(first_payload["key_fingerprint"], second_payload["key_fingerprint"])

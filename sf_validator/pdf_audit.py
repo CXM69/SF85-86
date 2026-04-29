@@ -120,6 +120,11 @@ def _build_page_contexts(page_texts: List[str]) -> List[PageContext]:
     contexts: List[PageContext] = []
     current_section = "unknown"
     for page_number, text in enumerate(page_texts, start=1):
+        split_contexts = _split_known_dual_section_page(page_number, text)
+        if split_contexts:
+            contexts.extend(split_contexts)
+            current_section = split_contexts[-1].section
+            continue
         section, subsection, title = _detect_section_and_title(text, current_section)
         entry_number = _detect_entry_number(text)
         current_section = section or "unknown"
@@ -135,6 +140,39 @@ def _build_page_contexts(page_texts: List[str]) -> List[PageContext]:
             )
         )
     return contexts
+
+
+def _split_known_dual_section_page(page_number: int, text: str) -> List[PageContext]:
+    section14_match = re.search(r"\bsection\s+14\b", text, re.IGNORECASE)
+    section15_match = re.search(r"\bsection\s+15\b", text, re.IGNORECASE)
+    if not section14_match or not section15_match or section15_match.start() <= section14_match.start():
+        return []
+
+    section14_text = text[section14_match.start():section15_match.start()].strip()
+    section15_text = text[section15_match.start():].strip()
+    if not section14_text or not section15_text:
+        return []
+
+    return [
+        PageContext(
+            page=page_number,
+            section="14",
+            subsection="14",
+            section_title=_section_title_fallback("14"),
+            entry_number=_detect_entry_number(section14_text),
+            text=section14_text,
+            snippet=_snippet(section14_text),
+        ),
+        PageContext(
+            page=page_number,
+            section="15",
+            subsection="15",
+            section_title=_section_title_fallback("15"),
+            entry_number=_detect_entry_number(section15_text),
+            text=section15_text,
+            snippet=_snippet(section15_text),
+        ),
+    ]
 
 
 def _sequence_gap_findings(page_contexts: List[PageContext], form_type: str) -> List[PdfFinding]:
