@@ -1,9 +1,9 @@
 services:
   - type: web
-    name: SF86-validator
+    name: sf86-validator
     runtime: python
     plan: free
-    buildCommand: "pip install ."
+    buildCommand: "pip install -r requirements.txt"
     startCommand: "python -m sf_validator.web"
     envVars:
       - key: PYTHON_VERSION

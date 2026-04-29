@@ -101,6 +101,11 @@ Deployment config is in [render.yaml](render.yaml). The service starts with:
 python -m sf_validator.web
 ```
 
+Render installs the app through [requirements.txt](requirements.txt), which points
+to the local package and installs the dependencies declared in
+[pyproject.toml](pyproject.toml). Python is pinned in [.python-version](.python-version)
+and mirrored in `render.yaml`.
+
 ## Supported Validation Areas
 
 - Section 11: residence checks
