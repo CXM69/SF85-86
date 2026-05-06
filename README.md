@@ -117,8 +117,8 @@ Build and run locally:
 ```bash
 docker build -t sf85-86-validator .
 docker run --rm -p 8000:8000 \
-  -e SF_VALIDATOR_AUTH_USERNAME=reviewer \
-  -e SF_VALIDATOR_AUTH_PASSWORD=change-me \
+  -e AUTH_USER=reviewer \
+  -e AUTH_PASS=change-me \
   sf85-86-validator
 ```
 
@@ -149,15 +149,17 @@ Runtime controls:
 - `SF_VALIDATOR_REQUEST_TIMEOUT_SECONDS`: request body read timeout, default `30`
 - `SF_VALIDATOR_SESSION_TTL_SECONDS`: in-memory session cleanup TTL, default `3600`
 - `SF_VALIDATOR_TEMP_DIR`: app-owned temp directory cleared on startup/shutdown
-- `SF_VALIDATOR_AUTH_USERNAME`: Basic Auth username
-- `SF_VALIDATOR_AUTH_PASSWORD`: Basic Auth password
+- `AUTH_USER`: Basic Auth username
+- `AUTH_PASS`: Basic Auth password
+- `SF_VALIDATOR_AUTH_USERNAME`: legacy Basic Auth username alias
+- `SF_VALIDATOR_AUTH_PASSWORD`: legacy Basic Auth password alias
 - `SF_VALIDATOR_ALLOW_UNAUTHENTICATED`: set to `true` only for private local development
 
 ## Render Deployment
 
 Deployment config is in [render.yaml](render.yaml). Render uses the Dockerfile,
-checks `/health`, and requires `SF_VALIDATOR_AUTH_USERNAME` plus
-`SF_VALIDATOR_AUTH_PASSWORD` to be present before the service starts.
+checks `/health`, and requires `AUTH_USER` plus `AUTH_PASS` to be present before
+the service starts.
 
 ## Supported Validation Areas
 

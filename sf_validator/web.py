@@ -65,10 +65,9 @@ def _privacy_headers(
 
 
 def _auth_credentials() -> Tuple[str, str]:
-    return (
-        os.environ.get("SF_VALIDATOR_AUTH_USERNAME", "").strip(),
-        os.environ.get("SF_VALIDATOR_AUTH_PASSWORD", ""),
-    )
+    username = os.environ.get("AUTH_USER", "").strip() or os.environ.get("SF_VALIDATOR_AUTH_USERNAME", "").strip()
+    password = os.environ.get("AUTH_PASS", "") or os.environ.get("SF_VALIDATOR_AUTH_PASSWORD", "")
+    return username, password
 
 
 def _auth_enabled() -> bool:
@@ -91,10 +90,10 @@ def _auth_configuration_error() -> str:
     if _allow_unauthenticated():
         return ""
     if username or password:
-        return "Both SF_VALIDATOR_AUTH_USERNAME and SF_VALIDATOR_AUTH_PASSWORD must be set."
+        return "Both AUTH_USER and AUTH_PASS must be set."
     return (
-        "Authentication is required. Set SF_VALIDATOR_AUTH_USERNAME and "
-        "SF_VALIDATOR_AUTH_PASSWORD, or set SF_VALIDATOR_ALLOW_UNAUTHENTICATED=true "
+        "Authentication is required. Set AUTH_USER and AUTH_PASS, or set "
+        "SF_VALIDATOR_ALLOW_UNAUTHENTICATED=true "
         "only for private local development."
     )
 

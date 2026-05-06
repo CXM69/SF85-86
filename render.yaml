@@ -6,9 +6,9 @@ services:
     dockerfilePath: ./Dockerfile
     healthCheckPath: /health
     envVars:
-      - key: SF_VALIDATOR_AUTH_USERNAME
+      - key: AUTH_USER
         sync: false
-      - key: SF_VALIDATOR_AUTH_PASSWORD
+      - key: AUTH_PASS
         sync: false
       - key: SF_VALIDATOR_MAX_UPLOAD_BYTES
         value: 26214400

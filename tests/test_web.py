@@ -87,6 +87,19 @@ class WebTests(unittest.TestCase):
             self.assertFalse(_authorized({}))
             self.assertFalse(_authorized({"Authorization": "Basic not-base64"}))
 
+    def test_auth_accepts_short_render_env_names(self) -> None:
+        encoded = base64.b64encode(b"reviewer:secret-pass").decode("ascii")
+        with patch.dict(
+            "os.environ",
+            {
+                "AUTH_USER": "reviewer",
+                "AUTH_PASS": "secret-pass",
+            },
+            clear=True,
+        ):
+            self.assertTrue(_authorized({"Authorization": f"Basic {encoded}"}))
+            self.assertEqual(_auth_configuration_error(), "")
+
     def test_validate_endpoint(self) -> None:
         status, body = handle_request("POST", "/validate", b'{"section_21": {"illegal_drug_use": "Yes"}}')
         self.assertEqual(status, 200)

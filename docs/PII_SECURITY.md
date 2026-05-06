@@ -21,7 +21,7 @@ This validator is designed for session-only review of SF-85/SF-86 material.
 
 ## Access Control
 
-- Set `SF_VALIDATOR_AUTH_USERNAME` and `SF_VALIDATOR_AUTH_PASSWORD` for all deployed environments.
+- Set `AUTH_USER` and `AUTH_PASS` for all deployed environments.
 - The service fails closed when credentials are missing unless `SF_VALIDATOR_ALLOW_UNAUTHENTICATED=true` is explicitly set.
 - Use `SF_VALIDATOR_ALLOW_UNAUTHENTICATED=true` only for private local development.
 - Use HTTPS whenever Basic Auth is enabled, because Basic Auth credentials are not encrypted without TLS.
