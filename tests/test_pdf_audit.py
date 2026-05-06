@@ -1,4 +1,5 @@
 import unittest
+from unittest.mock import patch
 
 from sf_validator.pdf_audit import audit_pdf
 
@@ -87,6 +88,13 @@ class PdfAuditTests(unittest.TestCase):
 
         with self.assertRaises(ValueError):
             audit_pdf(pdf_bytes, form_type="SF-89")
+
+    def test_rejects_pdf_over_configured_page_limit(self) -> None:
+        pdf_bytes = build_multi_page_pdf(["Section 11 Residence 123 Main St", "Section 12 Education School"])
+
+        with patch.dict("os.environ", {"SF_VALIDATOR_MAX_PDF_PAGES": "1"}):
+            with self.assertRaises(ValueError):
+                audit_pdf(pdf_bytes, form_type="SF86")
 
     def test_sf86_yes_without_supporting_detail_is_marked_incomplete(self) -> None:
         pdf_bytes = build_simple_pdf("Section 20C Foreign Travel Selected Yes")

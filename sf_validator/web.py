@@ -11,9 +11,12 @@ import json
 import os
 from pathlib import Path
 import re
+import secrets
 import shutil
 import signal
+import threading
 from typing import Any, Dict, Optional, Tuple, Union
+from urllib.parse import urlsplit
 
 from .cli import run_validation
 from .ledger import build_ledger_payload, clear_all_session_material, clear_expired_session_material, clear_session_material
@@ -22,10 +25,23 @@ from .schema import SchemaValidationError, input_schema
 
 
 DEFAULT_MAX_UPLOAD_BYTES = 25 * 1024 * 1024
+DEFAULT_MAX_CONCURRENT_REQUESTS = 8
+DEFAULT_REQUEST_TIMEOUT_SECONDS = 30
 SESSION_ID_RE = re.compile(r"^[A-Za-z0-9._:-]{1,128}$")
+TRUTHY_VALUES = {"1", "true", "yes", "on"}
 
 
-def _privacy_headers(content_type: str, content_length: int, clear_site_data: bool = False) -> Dict[str, str]:
+def _privacy_headers(
+    content_type: str,
+    content_length: int,
+    clear_site_data: bool = False,
+    csp_nonce: str = "",
+) -> Dict[str, str]:
+    script_src = "'self'"
+    style_src = "'self'"
+    if csp_nonce:
+        script_src = f"{script_src} 'nonce-{csp_nonce}'"
+        style_src = f"{style_src} 'nonce-{csp_nonce}'"
     headers = {
         "Content-Type": content_type,
         "Content-Length": str(content_length),
@@ -37,7 +53,11 @@ def _privacy_headers(content_type: str, content_length: int, clear_site_data: bo
         "X-Frame-Options": "DENY",
         "Cross-Origin-Opener-Policy": "same-origin",
         "Permissions-Policy": "camera=(), microphone=(), geolocation=(), payment=(), usb=()",
-        "Content-Security-Policy": "default-src 'self'; base-uri 'none'; connect-src 'self'; form-action 'none'; frame-ancestors 'none'; img-src 'self' data:; object-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'",
+        "Content-Security-Policy": (
+            "default-src 'self'; base-uri 'none'; connect-src 'self'; form-action 'none'; "
+            "frame-ancestors 'none'; img-src 'self' data:; object-src 'none'; "
+            f"script-src {script_src}; style-src {style_src}"
+        ),
     }
     if clear_site_data:
         headers["Clear-Site-Data"] = '"cache", "storage"'
@@ -56,10 +76,41 @@ def _auth_enabled() -> bool:
     return bool(username and password)
 
 
+def _truthy_env(name: str) -> bool:
+    return os.environ.get(name, "").strip().lower() in TRUTHY_VALUES
+
+
+def _allow_unauthenticated() -> bool:
+    return _truthy_env("SF_VALIDATOR_ALLOW_UNAUTHENTICATED")
+
+
+def _auth_configuration_error() -> str:
+    username, password = _auth_credentials()
+    if username and password:
+        return ""
+    if _allow_unauthenticated():
+        return ""
+    if username or password:
+        return "Both SF_VALIDATOR_AUTH_USERNAME and SF_VALIDATOR_AUTH_PASSWORD must be set."
+    return (
+        "Authentication is required. Set SF_VALIDATOR_AUTH_USERNAME and "
+        "SF_VALIDATOR_AUTH_PASSWORD, or set SF_VALIDATOR_ALLOW_UNAUTHENTICATED=true "
+        "only for private local development."
+    )
+
+
+def _require_valid_auth_configuration() -> None:
+    error = _auth_configuration_error()
+    if error:
+        raise RuntimeError(error)
+
+
 def _authorized(headers: Optional[Dict[str, str]]) -> bool:
     username, password = _auth_credentials()
-    if not username or not password:
+    if not username and not password and _allow_unauthenticated():
         return True
+    if not username or not password:
+        return False
     auth_value = _header_value(headers, "Authorization", "")
     if not auth_value.lower().startswith("basic "):
         return False
@@ -95,6 +146,22 @@ def _max_request_body_bytes() -> int:
         return DEFAULT_MAX_UPLOAD_BYTES
 
 
+def _request_timeout_seconds() -> int:
+    raw_value = os.environ.get("SF_VALIDATOR_REQUEST_TIMEOUT_SECONDS", str(DEFAULT_REQUEST_TIMEOUT_SECONDS))
+    try:
+        return max(1, int(raw_value))
+    except ValueError:
+        return DEFAULT_REQUEST_TIMEOUT_SECONDS
+
+
+def _max_concurrent_requests() -> int:
+    raw_value = os.environ.get("SF_VALIDATOR_MAX_CONCURRENT_REQUESTS", str(DEFAULT_MAX_CONCURRENT_REQUESTS))
+    try:
+        return max(1, int(raw_value))
+    except ValueError:
+        return DEFAULT_MAX_CONCURRENT_REQUESTS
+
+
 def _clear_bytes(buffer: bytearray) -> None:
     for index in range(len(buffer)):
         buffer[index] = 0
@@ -121,14 +188,14 @@ def _clear_private_temp_dir(create: bool) -> None:
         os.environ["TMPDIR"] = str(path)
 
 
-def _index_page() -> str:
+def _index_page(csp_nonce: str = "") -> str:
     return """<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>SF-85/86 Validator</title>
-  <style>
+  <style nonce="__CSP_NONCE__">
     :root {
       --bg: #edf3f9;
       --panel: #ffffff;
@@ -433,7 +500,7 @@ def _index_page() -> str:
     </div>
   </div>
 
-  <script>
+  <script nonce="__CSP_NONCE__">
     let selectedFormType = 'SF86';
     let selectedPdfFile = null;
     let activeSessionId = (window.crypto && window.crypto.randomUUID)
@@ -524,27 +591,51 @@ def _index_page() -> str:
         : `session-${Date.now()}-${Math.random().toString(16).slice(2)}`;
     }
 
+    function makeDiv(className, text) {
+      const element = document.createElement('div');
+      if (className) {
+        element.className = className;
+      }
+      if (text !== undefined && text !== null) {
+        element.textContent = String(text);
+      }
+      return element;
+    }
+
+    function setReviewEmpty(message) {
+      reviewList.replaceChildren(makeDiv('review-empty', message));
+    }
+
+    function setReviewError(title, message) {
+      const item = makeDiv('review-item');
+      item.appendChild(makeDiv('review-item-title', title));
+      item.appendChild(makeDiv('', message));
+      reviewList.replaceChildren(item);
+    }
+
     function renderReviewItems(findings) {
       if (!findings.length) {
-        reviewList.innerHTML = '<div class="review-empty">No review items were returned for this document.</div>';
+        setReviewEmpty('No review items were returned for this document.');
         return;
       }
 
-      reviewList.innerHTML = findings.map((item) => {
+      const fragment = document.createDocumentFragment();
+      findings.forEach((item) => {
         const scope = item.subsection && item.subsection !== item.section ? item.subsection : item.section;
         const location = item.page ? `Section ${scope} · Page ${item.page}` : `Section ${scope}`;
         const entry = item.entry_number ? `Entry #${item.entry_number}` : '';
         const protocol = item.screening_protocol || '';
         const meta = [entry, protocol].filter(Boolean).join(' · ');
-        return `
-          <div class="review-item">
-            <div class="review-item-title">${location}</div>
-            <div class="review-item-subtitle">${item.section_title || 'Review Item'}</div>
-            ${meta ? `<div class="review-item-meta">${meta}</div>` : ''}
-            <div>${item.message}</div>
-          </div>
-        `;
-      }).join('');
+        const reviewItem = makeDiv('review-item');
+        reviewItem.appendChild(makeDiv('review-item-title', location));
+        reviewItem.appendChild(makeDiv('review-item-subtitle', item.section_title || 'Review Item'));
+        if (meta) {
+          reviewItem.appendChild(makeDiv('review-item-meta', meta));
+        }
+        reviewItem.appendChild(makeDiv('', item.message || 'Review required.'));
+        fragment.appendChild(reviewItem);
+      });
+      reviewList.replaceChildren(fragment);
     }
 
     function releaseSelectedPdfFile(message = 'PDF released from browser memory after validation.') {
@@ -564,7 +655,7 @@ def _index_page() -> str:
       pdfFile.value = '';
       validateBtn.disabled = false;
       totalFlags.textContent = '0';
-      reviewList.innerHTML = '<div class="review-empty">Load a form and click Validate to see flagged sections and issues here.</div>';
+      setReviewEmpty('Load a form and click Validate to see flagged sections and issues here.');
       if (window.history && window.history.replaceState) {
         window.history.replaceState(null, '', window.location.pathname);
       }
@@ -588,7 +679,7 @@ def _index_page() -> str:
       validateBtn.disabled = true;
       setStatus(`Reviewing ${requestFormType} PDF...`, '');
       totalFlags.textContent = '0';
-      reviewList.innerHTML = '<div class="review-empty">Validation is running.</div>';
+      setReviewEmpty('Validation is running.');
 
       let result;
       try {
@@ -604,7 +695,7 @@ def _index_page() -> str:
         }
         releaseSelectedPdfFile('PDF released from browser memory after failed validation.');
         setStatus('Validation failed.', 'bad');
-        reviewList.innerHTML = '<div class="review-item"><div class="review-item-title">Request Error</div><div>Unable to complete PDF validation.</div></div>';
+        setReviewError('Request Error', 'Unable to complete PDF validation.');
         return;
       }
 
@@ -618,7 +709,7 @@ def _index_page() -> str:
       if (!result.ok) {
         releaseSelectedPdfFile('PDF released from browser memory after failed validation.');
         setStatus('Validation failed.', 'bad');
-        reviewList.innerHTML = `<div class="review-item"><div class="review-item-title">Request Error</div><div>${result.body.error || 'Unknown error'}</div></div>`;
+        setReviewError('Request Error', result.body.error || 'Unknown error');
         return;
       }
 
@@ -668,7 +759,7 @@ def _index_page() -> str:
     });
   </script>
 </body>
-</html>"""
+</html>""".replace("__CSP_NONCE__", csp_nonce)
 
 
 def _header_value(headers: Optional[Dict[str, str]], name: str, default: str = "") -> str:
@@ -724,16 +815,28 @@ def handle_request(method: str, path: str, body: Union[bytes, bytearray] = b"", 
 class ValidatorRequestHandler(BaseHTTPRequestHandler):
     server_version = "SF86Validator/0.1"
 
+    def setup(self) -> None:
+        super().setup()
+        self.connection.settimeout(_request_timeout_seconds())
+
+    def do_HEAD(self) -> None:  # noqa: N802
+        self._handle_get(send_body=False)
+
     def do_GET(self) -> None:  # noqa: N802
-        if self.path != "/health" and not _authorized({key: value for key, value in self.headers.items()}):
-            self._send_unauthorized()
+        self._handle_get(send_body=True)
+
+    def _handle_get(self, send_body: bool) -> None:
+        request_path = urlsplit(self.path).path
+        if request_path != "/health" and not _authorized({key: value for key, value in self.headers.items()}):
+            self._send_unauthorized(send_body=send_body)
             return
-        if self.path == "/":
-            status, body, content_type = _html_response(HTTPStatus.OK, _index_page())
-            self._send_bytes(status, body, content_type)
+        if request_path == "/":
+            csp_nonce = secrets.token_urlsafe(16)
+            status, body, content_type = _html_response(HTTPStatus.OK, _index_page(csp_nonce))
+            self._send_bytes(status, body, content_type, csp_nonce=csp_nonce, send_body=send_body)
             return
-        status, payload = handle_request("GET", self.path)
-        self._send_json(status, payload)
+        status, payload = handle_request("GET", request_path)
+        self._send_json(status, payload, send_body=send_body)
 
     def do_POST(self) -> None:  # noqa: N802
         if not _authorized({key: value for key, value in self.headers.items()}):
@@ -754,46 +857,99 @@ class ValidatorRequestHandler(BaseHTTPRequestHandler):
             )
             return
 
-        raw = bytearray(self.rfile.read(content_length))
         try:
-            status, payload = handle_request("POST", self.path, raw, headers={key: value for key, value in self.headers.items()})
+            raw = bytearray(self.rfile.read(content_length))
+        except (OSError, TimeoutError):
+            self.close_connection = True
+            self._send_json(HTTPStatus.REQUEST_TIMEOUT, {"error": "Timed out while reading request body"})
+            return
+        if len(raw) != content_length:
+            self.close_connection = True
+            self._send_json(HTTPStatus.BAD_REQUEST, {"error": "Incomplete request body"})
+            return
+        try:
+            status, payload = handle_request("POST", urlsplit(self.path).path, raw, headers={key: value for key, value in self.headers.items()})
         finally:
             _clear_bytes(raw)
             del raw
-        self._send_json(status, payload, clear_site_data=self.path == "/clear-session")
+        self._send_json(status, payload, clear_site_data=urlsplit(self.path).path == "/clear-session")
 
     def log_message(self, format: str, *args: object) -> None:
         """Suppress request logging to avoid copying request payload context to logs."""
         return
 
-    def _send_json(self, status: int, payload: Dict[str, Any], clear_site_data: bool = False) -> None:
+    def _send_json(
+        self,
+        status: int,
+        payload: Dict[str, Any],
+        clear_site_data: bool = False,
+        send_body: bool = True,
+    ) -> None:
         code, body = _json_response(status, payload)
-        self._send_bytes(code, body, "application/json", clear_site_data=clear_site_data)
+        self._send_bytes(code, body, "application/json", clear_site_data=clear_site_data, send_body=send_body)
 
-    def _send_unauthorized(self) -> None:
+    def _send_unauthorized(self, send_body: bool = True) -> None:
         code, body = _json_response(HTTPStatus.UNAUTHORIZED, {"error": "Authentication required"})
         self.send_response(code)
         for key, value in _privacy_headers("application/json", len(body)).items():
             self.send_header(key, value)
         self.send_header("WWW-Authenticate", 'Basic realm="SF-85/86 Validator", charset="UTF-8"')
         self.end_headers()
-        self.wfile.write(body)
+        if send_body:
+            self.wfile.write(body)
 
-    def _send_bytes(self, status: int, body: bytes, content_type: str, clear_site_data: bool = False) -> None:
+    def _send_bytes(
+        self,
+        status: int,
+        body: bytes,
+        content_type: str,
+        clear_site_data: bool = False,
+        csp_nonce: str = "",
+        send_body: bool = True,
+    ) -> None:
         self.send_response(status)
-        for key, value in _privacy_headers(content_type, len(body), clear_site_data=clear_site_data).items():
+        for key, value in _privacy_headers(content_type, len(body), clear_site_data=clear_site_data, csp_nonce=csp_nonce).items():
             self.send_header(key, value)
         self.end_headers()
-        self.wfile.write(body)
+        if send_body:
+            self.wfile.write(body)
+
+
+class ValidatorHTTPServer(ThreadingHTTPServer):
+    daemon_threads = True
+    request_queue_size = 16
+    allow_reuse_address = True
+
+    def __init__(self, server_address: Tuple[str, int], request_handler_class: type[BaseHTTPRequestHandler]) -> None:
+        self._request_semaphore = threading.BoundedSemaphore(_max_concurrent_requests())
+        super().__init__(server_address, request_handler_class)
+
+    def process_request(self, request: Any, client_address: Any) -> None:
+        if not self._request_semaphore.acquire(blocking=False):
+            request.close()
+            return
+        try:
+            super().process_request(request, client_address)
+        except Exception:
+            self._request_semaphore.release()
+            raise
+
+    def process_request_thread(self, request: Any, client_address: Any) -> None:
+        try:
+            super().process_request_thread(request, client_address)
+        finally:
+            self._request_semaphore.release()
 
 
 def serve() -> None:
+    _require_valid_auth_configuration()
     _clear_private_temp_dir(create=True)
+    host = os.environ.get("HOST", "0.0.0.0")
     port = int(os.environ.get("PORT", "8000"))
-    httpd = ThreadingHTTPServer(("0.0.0.0", port), ValidatorRequestHandler)
+    httpd = ValidatorHTTPServer((host, port), ValidatorRequestHandler)
     atexit.register(_cleanup_server_state)
     signal.signal(signal.SIGTERM, lambda _signum, _frame: (_cleanup_server_state(), httpd.shutdown()))
-    print("Serving SF-85/86 validator on port %s" % port)
+    print("Serving SF-85/86 validator on %s:%s" % (host, port))
     try:
         httpd.serve_forever()
     finally:

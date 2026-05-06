@@ -21,8 +21,9 @@ This validator is designed for session-only review of SF-85/SF-86 material.
 
 ## Access Control
 
-- Set `SF_VALIDATOR_AUTH_USERNAME` and `SF_VALIDATOR_AUTH_PASSWORD` to require HTTP Basic Auth for all non-health routes.
-- Leave both variables unset only for local, private development.
+- Set `SF_VALIDATOR_AUTH_USERNAME` and `SF_VALIDATOR_AUTH_PASSWORD` for all deployed environments.
+- The service fails closed when credentials are missing unless `SF_VALIDATOR_ALLOW_UNAUTHENTICATED=true` is explicitly set.
+- Use `SF_VALIDATOR_ALLOW_UNAUTHENTICATED=true` only for private local development.
 - Use HTTPS whenever Basic Auth is enabled, because Basic Auth credentials are not encrypted without TLS.
 
 ## Operational Requirements
@@ -30,4 +31,5 @@ This validator is designed for session-only review of SF-85/SF-86 material.
 - Run behind HTTPS when exposed beyond localhost.
 - Do not enable reverse-proxy request body logging.
 - Keep the app temp directory scoped to this service only.
+- Configure upload, PDF page, PDF audit timeout, and request timeout limits for the expected deployment size.
 - Prefer the Docker/Compose deployment because it runs as a non-root user, disables Python bytecode writes, uses no pip cache, and mounts `/tmp` as tmpfs.

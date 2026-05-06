@@ -93,7 +93,7 @@ Important defaults:
 - responses are marked `no-store`
 - `/clear-session` returns `Clear-Site-Data: "cache", "storage"`
 - application temp cleanup is scoped to `SF_VALIDATOR_TEMP_DIR`
-- optional Basic Auth protects the site when `SF_VALIDATOR_AUTH_USERNAME` and `SF_VALIDATOR_AUTH_PASSWORD` are set
+- Basic Auth is required unless `SF_VALIDATOR_ALLOW_UNAUTHENTICATED=true` is explicitly set for private local development
 
 ## Formal Schema Map
 
@@ -116,7 +116,10 @@ Build and run locally:
 
 ```bash
 docker build -t sf85-86-validator .
-docker run --rm -p 8000:8000 sf85-86-validator
+docker run --rm -p 8000:8000 \
+  -e SF_VALIDATOR_AUTH_USERNAME=reviewer \
+  -e SF_VALIDATOR_AUTH_PASSWORD=change-me \
+  sf85-86-validator
 ```
 
 Or run the hardened local Compose profile:
@@ -138,24 +141,23 @@ enable proxy request-body logging for routes that accept PDF or JSON input.
 Runtime controls:
 
 - `PORT`: HTTP port, default `8000`
+- `HOST`: bind address, default `0.0.0.0`
 - `SF_VALIDATOR_MAX_UPLOAD_BYTES`: PDF/JSON body limit, default `26214400`
+- `SF_VALIDATOR_MAX_CONCURRENT_REQUESTS`: concurrent request limit, default `8`
+- `SF_VALIDATOR_MAX_PDF_PAGES`: PDF page limit, default `120`
+- `SF_VALIDATOR_PDF_AUDIT_TIMEOUT_SECONDS`: per-PDF audit timeout, default `20`
+- `SF_VALIDATOR_REQUEST_TIMEOUT_SECONDS`: request body read timeout, default `30`
 - `SF_VALIDATOR_SESSION_TTL_SECONDS`: in-memory session cleanup TTL, default `3600`
 - `SF_VALIDATOR_TEMP_DIR`: app-owned temp directory cleared on startup/shutdown
-- `SF_VALIDATOR_AUTH_USERNAME`: enables Basic Auth when set with password
-- `SF_VALIDATOR_AUTH_PASSWORD`: required with username to protect the site
+- `SF_VALIDATOR_AUTH_USERNAME`: Basic Auth username
+- `SF_VALIDATOR_AUTH_PASSWORD`: Basic Auth password
+- `SF_VALIDATOR_ALLOW_UNAUTHENTICATED`: set to `true` only for private local development
 
-## Render Legacy
+## Render Deployment
 
-Deployment config is in [render.yaml](render.yaml). The service starts with:
-
-```bash
-python -m sf_validator.web
-```
-
-Render installs the app through [requirements.txt](requirements.txt), which points
-to the local package and installs the dependencies declared in
-[pyproject.toml](pyproject.toml). Python is pinned in [.python-version](.python-version)
-and mirrored in `render.yaml`.
+Deployment config is in [render.yaml](render.yaml). Render uses the Dockerfile,
+checks `/health`, and requires `SF_VALIDATOR_AUTH_USERNAME` plus
+`SF_VALIDATOR_AUTH_PASSWORD` to be present before the service starts.
 
 ## Supported Validation Areas
 

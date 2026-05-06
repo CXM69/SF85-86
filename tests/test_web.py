@@ -3,7 +3,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from sf_validator.web import _authorized, _clear_bytes, _index_page, _privacy_headers, handle_request
+from sf_validator.web import _authorized, _auth_configuration_error, _clear_bytes, _index_page, _privacy_headers, handle_request
 
 
 class WebTests(unittest.TestCase):
@@ -35,6 +35,8 @@ class WebTests(unittest.TestCase):
         self.assertIn("sendBeacon", html)
         self.assertIn("releaseSelectedPdfFile", html)
         self.assertIn("new Uint8Array(pdfBuffer).fill(0)", html)
+        self.assertIn("replaceChildren", html)
+        self.assertNotIn("innerHTML", html)
 
     def test_privacy_headers_disable_caching(self) -> None:
         headers = _privacy_headers("application/json", 42)
@@ -44,7 +46,13 @@ class WebTests(unittest.TestCase):
         self.assertEqual(headers["Referrer-Policy"], "no-referrer")
         self.assertEqual(headers["X-Frame-Options"], "DENY")
         self.assertIn("connect-src 'self'", headers["Content-Security-Policy"])
+        self.assertNotIn("unsafe-inline", headers["Content-Security-Policy"])
         self.assertNotIn("Clear-Site-Data", headers)
+
+    def test_privacy_headers_allow_nonce_bound_inline_assets(self) -> None:
+        headers = _privacy_headers("text/html", 42, csp_nonce="abc123")
+        self.assertIn("script-src 'self' 'nonce-abc123'", headers["Content-Security-Policy"])
+        self.assertIn("style-src 'self' 'nonce-abc123'", headers["Content-Security-Policy"])
 
     def test_clear_session_headers_clear_browser_storage(self) -> None:
         headers = _privacy_headers("application/json", 20, clear_site_data=True)
@@ -55,9 +63,15 @@ class WebTests(unittest.TestCase):
         _clear_bytes(buffer)
         self.assertEqual(buffer, bytearray(len(buffer)))
 
-    def test_auth_allows_requests_when_credentials_are_unset(self) -> None:
+    def test_auth_rejects_requests_when_credentials_are_unset_by_default(self) -> None:
         with patch.dict("os.environ", {}, clear=True):
+            self.assertFalse(_authorized({}))
+            self.assertIn("Authentication is required", _auth_configuration_error())
+
+    def test_auth_allows_explicit_local_unauthenticated_mode(self) -> None:
+        with patch.dict("os.environ", {"SF_VALIDATOR_ALLOW_UNAUTHENTICATED": "true"}, clear=True):
             self.assertTrue(_authorized({}))
+            self.assertEqual(_auth_configuration_error(), "")
 
     def test_auth_requires_matching_basic_credentials(self) -> None:
         encoded = base64.b64encode(b"reviewer:secret-pass").decode("ascii")

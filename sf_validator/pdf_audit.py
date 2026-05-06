@@ -4,7 +4,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from io import BytesIO
+import os
 import re
+import time
 from typing import Any, Dict, List, Optional, Union
 
 from pypdf import PdfReader
@@ -85,14 +87,43 @@ class PageContext:
 
 
 PdfBytes = Union[bytes, bytearray, memoryview]
+DEFAULT_MAX_PDF_PAGES = 120
+DEFAULT_PDF_AUDIT_TIMEOUT_SECONDS = 20
+
+
+def _max_pdf_pages() -> int:
+    raw_value = os.environ.get("SF_VALIDATOR_MAX_PDF_PAGES", str(DEFAULT_MAX_PDF_PAGES))
+    try:
+        return max(1, int(raw_value))
+    except ValueError:
+        return DEFAULT_MAX_PDF_PAGES
+
+
+def _pdf_audit_timeout_seconds() -> int:
+    raw_value = os.environ.get("SF_VALIDATOR_PDF_AUDIT_TIMEOUT_SECONDS", str(DEFAULT_PDF_AUDIT_TIMEOUT_SECONDS))
+    try:
+        return max(1, int(raw_value))
+    except ValueError:
+        return DEFAULT_PDF_AUDIT_TIMEOUT_SECONDS
 
 
 def audit_pdf(pdf_bytes: PdfBytes, form_type: str = "SF86") -> Dict[str, Any]:
     normalized_form_type = _normalize_form_type(form_type)
+    started_at = time.monotonic()
     pdf_buffer = BytesIO(pdf_bytes)
     try:
-        reader = PdfReader(pdf_buffer)
-        pages = [page.extract_text() or "" for page in reader.pages]
+        reader = PdfReader(pdf_buffer, strict=False)
+        if getattr(reader, "is_encrypted", False):
+            raise ValueError("Encrypted PDFs are not supported.")
+        max_pages = _max_pdf_pages()
+        if len(reader.pages) > max_pages:
+            raise ValueError(f"PDF exceeds the configured page limit of {max_pages} pages.")
+        timeout_seconds = _pdf_audit_timeout_seconds()
+        pages = []
+        for page in reader.pages:
+            if time.monotonic() - started_at > timeout_seconds:
+                raise TimeoutError(f"PDF audit exceeded the configured timeout of {timeout_seconds} seconds.")
+            pages.append(page.extract_text() or "")
         page_contexts = _build_page_contexts(pages)
         from .main import build_pdf_audit_outputs
 

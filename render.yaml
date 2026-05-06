@@ -1,14 +1,26 @@
 services:
   - type: web
     name: SF86-validator
-    runtime: python
-    plan: free
-    buildCommand: "pip install -r requirements.txt"
-    startCommand: "python -m sf_validator.web"
+    runtime: docker
+    plan: starter
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /health
     envVars:
-      - key: PYTHON_VERSION
-        value: 3.11.9
       - key: SF_VALIDATOR_AUTH_USERNAME
         sync: false
       - key: SF_VALIDATOR_AUTH_PASSWORD
         sync: false
+      - key: SF_VALIDATOR_MAX_UPLOAD_BYTES
+        value: 26214400
+      - key: SF_VALIDATOR_MAX_CONCURRENT_REQUESTS
+        value: 8
+      - key: SF_VALIDATOR_MAX_PDF_PAGES
+        value: 120
+      - key: SF_VALIDATOR_PDF_AUDIT_TIMEOUT_SECONDS
+        value: 20
+      - key: SF_VALIDATOR_REQUEST_TIMEOUT_SECONDS
+        value: 30
+      - key: SF_VALIDATOR_SESSION_TTL_SECONDS
+        value: 3600
+      - key: SF_VALIDATOR_TEMP_DIR
+        value: /tmp/sf-validator
