@@ -87,16 +87,27 @@ class PageContext:
 
 
 PdfBytes = Union[bytes, bytearray, memoryview]
-DEFAULT_MAX_PDF_PAGES = 120
 DEFAULT_PDF_AUDIT_TIMEOUT_SECONDS = 20
+TRUTHY_VALUES = {"1", "true", "yes", "on"}
 
 
-def _max_pdf_pages() -> int:
-    raw_value = os.environ.get("SF_VALIDATOR_MAX_PDF_PAGES", str(DEFAULT_MAX_PDF_PAGES))
+def _truthy_env(name: str) -> bool:
+    return os.environ.get(name, "").strip().lower() in TRUTHY_VALUES
+
+
+def _sequence_gap_check_enabled() -> bool:
+    return _truthy_env("SF_VALIDATOR_ENABLE_SEQUENCE_GAP_CHECK")
+
+
+def _max_pdf_pages() -> Optional[int]:
+    raw_value = os.environ.get("SF_VALIDATOR_MAX_PDF_PAGES", "").strip()
+    if not raw_value:
+        return None
     try:
-        return max(1, int(raw_value))
+        parsed = int(raw_value)
     except ValueError:
-        return DEFAULT_MAX_PDF_PAGES
+        return None
+    return parsed if parsed > 0 else None
 
 
 def _pdf_audit_timeout_seconds() -> int:
@@ -116,7 +127,7 @@ def audit_pdf(pdf_bytes: PdfBytes, form_type: str = "SF86") -> Dict[str, Any]:
         if getattr(reader, "is_encrypted", False):
             raise ValueError("Encrypted PDFs are not supported.")
         max_pages = _max_pdf_pages()
-        if len(reader.pages) > max_pages:
+        if max_pages is not None and len(reader.pages) > max_pages:
             raise ValueError(f"PDF exceeds the configured page limit of {max_pages} pages.")
         timeout_seconds = _pdf_audit_timeout_seconds()
         pages = []
@@ -224,6 +235,8 @@ def _split_known_dual_section_page(page_number: int, text: str) -> List[PageCont
 
 def _sequence_gap_findings(page_contexts: List[PageContext], form_type: str) -> List[PdfFinding]:
     findings: List[PdfFinding] = []
+    if not _sequence_gap_check_enabled():
+        return findings
     detected_sections = [(_main_section_number(context.section), context) for context in page_contexts]
     detected_sections = [(number, context) for number, context in detected_sections if number is not None]
     if not detected_sections:

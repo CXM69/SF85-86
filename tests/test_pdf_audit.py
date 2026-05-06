@@ -429,7 +429,7 @@ class PdfAuditTests(unittest.TestCase):
 
         self.assertEqual(result["finding_count"], 0)
 
-    def test_sequence_gap_between_main_sections_is_flagged(self) -> None:
+    def test_sequence_gap_check_is_disabled_by_default(self) -> None:
         pdf_bytes = build_multi_page_pdf(
             [
                 "Section 5 Employment Activities Employer Name From To Supervisor",
@@ -438,6 +438,20 @@ class PdfAuditTests(unittest.TestCase):
         )
 
         result = audit_pdf(pdf_bytes, form_type="SF86")
+
+        gap_sections = [finding["section"] for finding in result["findings"] if finding["code"] == "PDF_SECTION_SEQUENCE_GAP"]
+        self.assertEqual(gap_sections, [])
+
+    def test_sequence_gap_between_main_sections_is_flagged_when_enabled(self) -> None:
+        pdf_bytes = build_multi_page_pdf(
+            [
+                "Section 5 Employment Activities Employer Name From To Supervisor",
+                "Section 20 Psychological and Emotional Health Selected Yes",
+            ]
+        )
+
+        with patch.dict("os.environ", {"SF_VALIDATOR_ENABLE_SEQUENCE_GAP_CHECK": "true"}):
+            result = audit_pdf(pdf_bytes, form_type="SF86")
 
         gap_sections = [finding["section"] for finding in result["findings"] if finding["code"] == "PDF_SECTION_SEQUENCE_GAP"]
         self.assertIn("6", gap_sections)
@@ -460,7 +474,8 @@ class PdfAuditTests(unittest.TestCase):
             ]
         )
 
-        result = audit_pdf(pdf_bytes, form_type="SF86")
+        with patch.dict("os.environ", {"SF_VALIDATOR_ENABLE_SEQUENCE_GAP_CHECK": "true"}):
+            result = audit_pdf(pdf_bytes, form_type="SF86")
 
         gap_sections = [finding["section"] for finding in result["findings"] if finding["code"] == "PDF_SECTION_SEQUENCE_GAP"]
         self.assertIn("8", gap_sections)
@@ -477,7 +492,8 @@ class PdfAuditTests(unittest.TestCase):
             ]
         )
 
-        result = audit_pdf(pdf_bytes, form_type="SF86")
+        with patch.dict("os.environ", {"SF_VALIDATOR_ENABLE_SEQUENCE_GAP_CHECK": "true"}):
+            result = audit_pdf(pdf_bytes, form_type="SF86")
 
         gap_sections = [finding["section"] for finding in result["findings"] if finding["code"] == "PDF_SECTION_SEQUENCE_GAP"]
         self.assertIn("12", gap_sections)
@@ -491,7 +507,8 @@ class PdfAuditTests(unittest.TestCase):
             ]
         )
 
-        result = audit_pdf(pdf_bytes, form_type="SF86")
+        with patch.dict("os.environ", {"SF_VALIDATOR_ENABLE_SEQUENCE_GAP_CHECK": "true"}):
+            result = audit_pdf(pdf_bytes, form_type="SF86")
 
         sections = [finding["section"] for finding in result["findings"][:5]]
         self.assertEqual(sections[:4], ["1", "2", "3", "4"])

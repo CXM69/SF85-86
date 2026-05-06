@@ -144,8 +144,9 @@ Runtime controls:
 - `HOST`: bind address, default `0.0.0.0`
 - `SF_VALIDATOR_MAX_UPLOAD_BYTES`: PDF/JSON body limit, default `26214400`
 - `SF_VALIDATOR_MAX_CONCURRENT_REQUESTS`: concurrent request limit, default `8`
-- `SF_VALIDATOR_MAX_PDF_PAGES`: PDF page limit, default `120`
+- `SF_VALIDATOR_MAX_PDF_PAGES`: optional PDF page limit; unset or `0` means no page limit
 - `SF_VALIDATOR_PDF_AUDIT_TIMEOUT_SECONDS`: per-PDF audit timeout, default `20`
+- `SF_VALIDATOR_ENABLE_SEQUENCE_GAP_CHECK`: opt-in coarse section sequence gap check, default off
 - `SF_VALIDATOR_REQUEST_TIMEOUT_SECONDS`: request body read timeout, default `30`
 - `SF_VALIDATOR_SESSION_TTL_SECONDS`: in-memory session cleanup TTL, default `3600`
 - `SF_VALIDATOR_TEMP_DIR`: app-owned temp directory cleared on startup/shutdown

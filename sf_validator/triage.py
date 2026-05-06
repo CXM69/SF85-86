@@ -3,16 +3,37 @@
 from __future__ import annotations
 
 from typing import Any, Dict, List, Mapping, Sequence
+import re
 
 from .form_schema import get_section_schema
 from .pdf_audit import PageContext, PdfFinding
 
 
-def build_fatal_missing_section_findings(page_contexts: Sequence[PageContext], form_type: str) -> List[PdfFinding]:
+def _detected_sections(page_contexts: Sequence[PageContext], findings: Sequence[PdfFinding] = ()) -> set[str]:
+    detected = {context.section for context in page_contexts}
+    detected.update(
+        finding.section
+        for finding in findings
+        if finding.code not in {"PDF_TRIAGE_FATAL_MISSING_SECTION", "PDF_SECTION_SEQUENCE_GAP"}
+    )
+    detected.update(_main_section_id(section) for section in list(detected) if _main_section_id(section))
+    return detected
+
+
+def _main_section_id(section: str) -> str:
+    match = re.match(r"(\d+)", section or "")
+    return match.group(1) if match else ""
+
+
+def build_fatal_missing_section_findings(
+    page_contexts: Sequence[PageContext],
+    findings: Sequence[PdfFinding],
+    form_type: str,
+) -> List[PdfFinding]:
     if form_type != "SF86":
         return []
 
-    detected_sections = {context.section for context in page_contexts}
+    detected_sections = _detected_sections(page_contexts, findings)
     if not any(section != "unknown" for section in detected_sections):
         return []
     findings: List[PdfFinding] = []
@@ -41,7 +62,7 @@ def build_fatal_missing_section_findings(page_contexts: Sequence[PageContext], f
 
 
 def build_triage_report(page_contexts: Sequence[PageContext], findings: Sequence[PdfFinding], form_type: str) -> Dict[str, Any]:
-    detected_sections = {context.section for context in page_contexts}
+    detected_sections = _detected_sections(page_contexts, findings)
     has_detected_section = any(section != "unknown" for section in detected_sections)
     findings_by_section: Dict[str, List[PdfFinding]] = {}
     for finding in findings:

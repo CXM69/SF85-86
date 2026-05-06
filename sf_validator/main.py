@@ -22,7 +22,7 @@ def run_pdf_audit(page_contexts: List[PageContext], form_type: str) -> List[PdfF
     registry.register(ConductAudit())
 
     findings = registry.run(page_contexts, form_type)
-    findings.extend(build_fatal_missing_section_findings(page_contexts, form_type))
+    findings.extend(build_fatal_missing_section_findings(page_contexts, findings, form_type))
     findings.extend(_sequence_gap_findings(page_contexts, form_type))
     return sorted(findings, key=_finding_sort_key)
 
