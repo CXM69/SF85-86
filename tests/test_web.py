@@ -3,7 +3,15 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from sf_validator.web import _authorized, _auth_configuration_error, _clear_bytes, _index_page, _privacy_headers, handle_request
+from sf_validator.web import (
+    _auth_configuration_error,
+    _authorized,
+    _clean_auth_env_value,
+    _clear_bytes,
+    _index_page,
+    _privacy_headers,
+    handle_request,
+)
 
 
 class WebTests(unittest.TestCase):
@@ -99,6 +107,45 @@ class WebTests(unittest.TestCase):
         ):
             self.assertTrue(_authorized({"Authorization": f"Basic {encoded}"}))
             self.assertEqual(_auth_configuration_error(), "")
+
+    def test_auth_accepts_common_alias_env_names(self) -> None:
+        encoded = base64.b64encode(b"reviewer:secret-pass").decode("ascii")
+        with patch.dict(
+            "os.environ",
+            {
+                "AUTH_USERNAME": "reviewer",
+                "AUTH_PASSWORD": "secret-pass",
+            },
+            clear=True,
+        ):
+            self.assertTrue(_authorized({"Authorization": f"Basic {encoded}"}))
+            self.assertEqual(_auth_configuration_error(), "")
+
+    def test_auth_does_not_mix_partial_new_env_with_complete_legacy_env(self) -> None:
+        encoded = base64.b64encode(b"legacy-user:legacy-pass").decode("ascii")
+        with patch.dict(
+            "os.environ",
+            {
+                "AUTH_USER": "partial-user",
+                "SF_VALIDATOR_AUTH_USERNAME": "legacy-user",
+                "SF_VALIDATOR_AUTH_PASSWORD": "legacy-pass",
+            },
+            clear=True,
+        ):
+            self.assertTrue(_authorized({"Authorization": f"Basic {encoded}"}))
+
+    def test_auth_env_values_are_trimmed(self) -> None:
+        self.assertEqual(_clean_auth_env_value(" 'secret-pass' \n"), "secret-pass")
+        encoded = base64.b64encode(b"reviewer:secret-pass").decode("ascii")
+        with patch.dict(
+            "os.environ",
+            {
+                "AUTH_USER": " reviewer ",
+                "AUTH_PASS": ' "secret-pass" ',
+            },
+            clear=True,
+        ):
+            self.assertTrue(_authorized({"Authorization": f"Basic {encoded}"}))
 
     def test_validate_endpoint(self) -> None:
         status, body = handle_request("POST", "/validate", b'{"section_21": {"illegal_drug_use": "Yes"}}')

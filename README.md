@@ -151,6 +151,7 @@ Runtime controls:
 - `SF_VALIDATOR_TEMP_DIR`: app-owned temp directory cleared on startup/shutdown
 - `AUTH_USER`: Basic Auth username
 - `AUTH_PASS`: Basic Auth password
+- `AUTH_USERNAME` / `AUTH_PASSWORD`: alternate Basic Auth env names
 - `SF_VALIDATOR_AUTH_USERNAME`: legacy Basic Auth username alias
 - `SF_VALIDATOR_AUTH_PASSWORD`: legacy Basic Auth password alias
 - `SF_VALIDATOR_ALLOW_UNAUTHENTICATED`: set to `true` only for private local development

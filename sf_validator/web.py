@@ -29,6 +29,13 @@ DEFAULT_MAX_CONCURRENT_REQUESTS = 8
 DEFAULT_REQUEST_TIMEOUT_SECONDS = 30
 SESSION_ID_RE = re.compile(r"^[A-Za-z0-9._:-]{1,128}$")
 TRUTHY_VALUES = {"1", "true", "yes", "on"}
+AUTH_ENV_PAIRS = (
+    ("AUTH_USER", "AUTH_PASS"),
+    ("AUTH_USERNAME", "AUTH_PASSWORD"),
+    ("BASIC_AUTH_USER", "BASIC_AUTH_PASS"),
+    ("BASIC_AUTH_USERNAME", "BASIC_AUTH_PASSWORD"),
+    ("SF_VALIDATOR_AUTH_USERNAME", "SF_VALIDATOR_AUTH_PASSWORD"),
+)
 
 
 def _privacy_headers(
@@ -65,9 +72,22 @@ def _privacy_headers(
 
 
 def _auth_credentials() -> Tuple[str, str]:
-    username = os.environ.get("AUTH_USER", "").strip() or os.environ.get("SF_VALIDATOR_AUTH_USERNAME", "").strip()
-    password = os.environ.get("AUTH_PASS", "") or os.environ.get("SF_VALIDATOR_AUTH_PASSWORD", "")
-    return username, password
+    first_partial: Optional[Tuple[str, str]] = None
+    for username_key, password_key in AUTH_ENV_PAIRS:
+        username = _clean_auth_env_value(os.environ.get(username_key, ""))
+        password = _clean_auth_env_value(os.environ.get(password_key, ""))
+        if username and password:
+            return username, password
+        if (username or password) and first_partial is None:
+            first_partial = (username, password)
+    return first_partial or ("", "")
+
+
+def _clean_auth_env_value(value: str) -> str:
+    cleaned = value.strip()
+    if len(cleaned) >= 2 and cleaned[0] == cleaned[-1] and cleaned[0] in {"'", '"'}:
+        cleaned = cleaned[1:-1].strip()
+    return cleaned
 
 
 def _auth_enabled() -> bool:
@@ -90,10 +110,10 @@ def _auth_configuration_error() -> str:
     if _allow_unauthenticated():
         return ""
     if username or password:
-        return "Both AUTH_USER and AUTH_PASS must be set."
+        return "Both username and password auth environment variables must be set."
     return (
-        "Authentication is required. Set AUTH_USER and AUTH_PASS, or set "
-        "SF_VALIDATOR_ALLOW_UNAUTHENTICATED=true "
+        "Authentication is required. Set AUTH_USER and AUTH_PASS, or another supported "
+        "auth username/password pair. Set SF_VALIDATOR_ALLOW_UNAUTHENTICATED=true "
         "only for private local development."
     )
 
